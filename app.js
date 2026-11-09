@@ -6,7 +6,7 @@
   var OLD_KEY = 'sagcalc.v1';
   var MM_PER_IN = 25.4;
   var EPS = 1e-6;
-  var GAP_WARN_MM = 5;
+  var TOL_MM = 3; // "close enough" band either side of the target
   var ENDS = ['rear', 'front'];
   var NAMES = { rear: 'Rear', front: 'Front' };
 
@@ -36,13 +36,11 @@
     }
   };
 
-  var GAP_TEXT = 'Big gap between readings: something may be binding (linkage, fork seals).';
   var FIT_TEXT = 'Longer than fully extended. Check the mm / in switch.';
 
   // ---------- helpers ----------
   function ok(v) { return typeof v === 'number' && isFinite(v); }
   function numOrNull(v) { return ok(v) ? v : null; }
-  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -52,11 +50,9 @@
   function each(sel, fn) { Array.prototype.forEach.call(document.querySelectorAll(sel), fn); }
 
   // ---------- state ----------
-  function newEnd() {
-    return { travel: null, extended: null, log: [], freeA: null, freeB: null, normal: '', loaded: '' };
-  }
+  function newEnd() { return { travel: null, extended: null, reading: null, free: null }; }
   function freshState() {
-    return { units: 'mm', fieldUnits: {}, which: 'both', preset: 'dualsport', custom: null, tol: 3, rear: newEnd(), front: newEnd() };
+    return { units: 'mm', fieldUnits: {}, which: 'both', preset: 'dualsport', custom: null, rear: newEnd(), front: newEnd() };
   }
 
   function normalize(s) {
@@ -67,13 +63,8 @@
         if (s.fieldUnits[k] === 'mm' || s.fieldUnits[k] === 'in') o.fieldUnits[k] = s.fieldUnits[k];
       });
     }
-    if (s.travelUnit === 'mm' || s.travelUnit === 'in') { // earlier version: one travel unit
-      o.fieldUnits['travel.rear'] = o.fieldUnits['travel.rear'] || s.travelUnit;
-      o.fieldUnits['travel.front'] = o.fieldUnits['travel.front'] || s.travelUnit;
-    }
     if (['both', 'rear', 'front'].indexOf(s.which) >= 0) o.which = s.which;
     if (s.preset === 'custom' || RANGES.rear[s.preset]) o.preset = s.preset;
-    if (ok(s.tol)) o.tol = s.tol;
     if (s.custom && typeof s.custom === 'object') {
       o.custom = {};
       ENDS.forEach(function (e) {
@@ -84,17 +75,19 @@
     if (o.preset === 'custom' && !o.custom) o.preset = 'dualsport';
     ENDS.forEach(function (e) {
       var src = s[e] && typeof s[e] === 'object' ? s[e] : {};
-      Object.keys(o[e]).forEach(function (k) { if (k in src) o[e][k] = src[k]; });
-      if (!Array.isArray(o[e].log)) o[e].log = [];
+      o[e].travel = numOrNull(src.travel);
+      o[e].extended = numOrNull(src.extended);
+      o[e].reading = numOrNull(src.reading);
+      o[e].free = numOrNull(src.free);
     });
     return o;
   }
 
-  // The first version kept several bikes; carry the first one over.
+  // The first version kept several bikes; carry the first one's setup over.
   function fromV1(s) {
     var b = s && Array.isArray(s.bikes) && s.bikes[0];
     if (!b) return null;
-    return { units: s.units, tol: b.rear && b.rear.tol, preset: b.rear && b.rear.type, rear: b.rear, front: b.front };
+    return { units: s.units, preset: b.rear && b.rear.type, rear: b.rear, front: b.front };
   }
 
   var storageOk = true;
@@ -119,7 +112,6 @@
   }
 
   var state = load();
-  var confirmClear = { rear: false, front: false };
   function shown(end) { return state.which === 'both' || state.which === end; }
 
   // ---------- units ----------
@@ -144,11 +136,6 @@
     return (n === 0 ? 0 : n).toString();
   }
   function fmtLen(mm, u) { return fmtNum(mm, u) + ' ' + (u || tUnit()); }
-  function fmtOff(d) {
-    var s = fmtNum(Math.abs(d));
-    if (s === '0') return 'on target';
-    return (d > 0 ? '+' : '−') + s + ' ' + tUnit();
-  }
 
   // Accepts 21, 21.5, 21,5, 21 5/16, 21-5/16, 5/16, with or without "in" / " / mm.
   function parseNum(str) {
@@ -164,14 +151,15 @@
     var n = Number(s);
     return isFinite(n) ? n : null;
   }
-  function parseLen(str, u) {
-    var v = parseNum(str);
-    return v == null ? null : (u === 'in' ? v * MM_PER_IN : v);
+  function boxVal(el) {
+    var v = parseNum(el.value);
+    return v == null ? null : (uOf(el.dataset.u) === 'in' ? v * MM_PER_IN : v);
   }
-  function boxVal(el) { return parseLen(el.value, uOf(el.dataset.u)); }
   function unreadable(el) { return el.value.trim() !== '' && boxVal(el) == null; }
 
   // ---------- math ----------
+  // Sag = fully extended − reading with you on it  (Race Tech: L1 − L2)
+  // so the reading to aim for = fully extended − (travel × sag %).
   function pcts(end) {
     if (state.preset === 'custom') {
       var c = state.custom[end];
@@ -188,56 +176,39 @@
     if (ok(T) && ok(E) && ok(p.lo) && ok(p.hi)) {
       o.lo = Math.min(p.lo, p.hi);
       o.hi = Math.max(p.lo, p.hi);
-      o.t1 = E - T * o.lo / 100; // Target 1: least free sag (highest reading)
-      o.t2 = E - T * o.hi / 100; // Target 2: most free sag (lowest reading)
+      o.t1 = E - T * o.lo / 100; // least free sag (highest reading)
+      o.t2 = E - T * o.hi / 100; // most free sag (lowest reading)
     }
     return o;
   }
 
-  function avg(a, b) {
-    if (ok(a) && ok(b)) return (a + b) / 2;
-    return ok(a) ? a : ok(b) ? b : null;
-  }
-  function bigGap(a, b) { return ok(a) && ok(b) && Math.abs(a - b) > GAP_WARN_MM + EPS; }
-  function tol() { return ok(state.tol) ? Math.abs(state.tol) : 0; }
-
-  // Same two points: sitting on the bike can't read longer than hanging fully extended.
-  function misfit(r, s) { return ok(r) && ok(s.extended) && r > s.extended + 2; }
-
   function riderVerdict(r, target) {
-    if (!ok(target)) return null;
     var off = r - target;
-    if (off < -tol() - EPS) return { cls: 'adjust', icon: '▲', head: 'ADD preload', sub: 'Sitting too low by ' + fmtLen(-off) + '.' };
-    if (off > tol() + EPS) return { cls: 'adjust', icon: '▼', head: 'REDUCE preload', sub: 'Sitting too high by ' + fmtLen(off) + '.' };
-    return { cls: 'good', icon: '✓', head: 'Call it good', sub: 'Close enough.' };
+    if (off < -TOL_MM - EPS) return { cls: 'adjust', icon: '▲', head: 'ADD preload', how: 'tighten', sub: 'Sitting too low by ' + fmtLen(-off) + '.' };
+    if (off > TOL_MM + EPS) return { cls: 'adjust', icon: '▼', head: 'REDUCE preload', how: 'loosen', sub: 'Sitting too high by ' + fmtLen(off) + '.' };
+    return { cls: 'good', icon: '✓', head: 'Call it good', how: '', sub: 'Within ' + fmtLen(TOL_MM) + '.' };
   }
 
   function freeVerdict(r, c) {
-    if (!ok(c.t1)) return null;
     if (r > c.t1 + EPS) return { cls: 'adjust', head: 'Stiffer spring',
-      sub: 'Too little free sag. Your spring is too light for your weight: stiffer spring. Until then, keep your rider sag right and ride it.' };
+      sub: 'Too little free sag: spring too light for your weight. Until then, keep rider sag right and ride it.' };
     if (r < c.t2 - EPS) return { cls: 'adjust', head: 'Softer spring',
-      sub: 'Too much free sag. Your spring is too heavy for your weight: softer spring. Until then, set preload for rider sag and ride it.' };
+      sub: 'Too much free sag: spring too heavy for your weight. Until then, set preload for rider sag and ride it.' };
     return { cls: 'good', head: "Spring's right for you.", sub: '' };
   }
 
   // ---------- markup ----------
   function unitBtn(key) { return '<button type="button" class="u" data-act="box-unit" data-u="' + key + '"></button>'; }
 
-  // A length box with its own mm|in switch. Stored boxes get data-f; reading boxes get a name.
-  function box(o) {
+  function box(id, label, end, f) {
+    var key = f + '.' + end;
     return '<div class="field">' +
-      '<label class="lbl sm" for="' + o.id + '">' + o.label + '</label>' +
-      '<div class="inp"><input id="' + o.id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + o.end + '" data-u="' + o.u + '"' +
-        (o.f ? ' data-f="' + o.f + '"' : ' name="' + o.id + '"') + '>' + unitBtn(o.u) + '</div></div>';
-  }
-  function endSet(end, inner) {
-    return '<fieldset class="endset" data-show="' + end + '"><legend class="end-lbl">' + NAMES[end] + '</legend>' + inner + '</fieldset>';
+      '<label class="lbl sm" for="' + id + '">' + label + '</label>' +
+      '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-u="' + key + '">' + unitBtn(key) + '</div></div>';
   }
   function head(n, id, title) {
     return '<div class="stage-head"><span class="step" aria-hidden="true">' + n + '</span><h2 id="' + id + '" class="card-h">' + title + '</h2></div>';
   }
-  function pair(a, b) { return '<div class="pair">' + a + b + '</div>'; }
 
   function presetRowsHTML() {
     function cell(end, t) {
@@ -257,86 +228,43 @@
   }
 
   function flowHTML() {
-    function textBox(end, f, label, ph) {
-      var id = end + '-' + f;
-      return '<div class="field"><label class="lbl sm" for="' + id + '">' + label + '</label>' +
-        '<input class="text" id="' + id + '" type="text" autocomplete="off" maxlength="80" placeholder="' + ph + '" data-end="' + end + '" data-f="' + f + '"></div>';
-    }
     return '' +
-      // 1. Bike on a stand
-      '<section class="card" aria-labelledby="s1-h">' +
-        head(1, 's1-h', 'Fully extended') +
-        '<p class="hint">Bike on a stand, wheels off the ground. Measure from the axle to a fixed mark straight above it. Same two points every time.</p>' +
-        '<div class="pair">' +
-          '<div data-show="rear">' + box({ id: 'rear-ext', label: 'Rear', u: 'extended.rear', end: 'rear', f: 'extended' }) + '</div>' +
-          '<div data-show="front">' + box({ id: 'front-ext', label: 'Front', u: 'extended.front', end: 'front', f: 'extended' }) + '</div>' +
-        '</div>' +
-        '<div class="pair">' +
-          '<div class="target" id="rear-target" data-show="rear"></div>' +
-          '<div class="target" id="front-target" data-show="front"></div>' +
-        '</div>' +
-      '</section>' +
-
-      // 2. Rider on
       '<section class="card" aria-labelledby="s2-h">' +
-        head(2, 's2-h', 'You on the bike') +
-        '<p class="hint">In your gear, feet on the pegs. A helper lifts the bike a little and lets it settle, then pushes down and lets it come back. One reading is fine.</p>' +
-        '<form id="add" class="add" novalidate>' +
-          ENDS.map(function (end) {
-            return endSet(end,
-              pair(box({ id: end + '-a', label: 'Lifted &amp; settled', u: 'a.' + end, end: end }),
-                   box({ id: end + '-b', label: 'Pushed &amp; returned', u: 'b.' + end, end: end })) +
-              '<p class="preview" id="' + end + '-preview"></p>');
-          }).join('') +
-          '<button class="btn primary add-btn" type="submit">Add reading</button>' +
-          '<p class="form-err" id="add-err" hidden></p>' +
-        '</form>' +
-        '<div class="result" id="rear-result" data-show="rear"></div>' +
-        '<div class="result" id="front-result" data-show="front"></div>' +
-        '<p class="hint">Rear first, then front. Adjust preload and measure again until it says Call it good.</p>' +
-        '<div class="tol">' +
-          '<label class="lbl sm" for="tol">Close enough ±</label>' +
-          '<div class="inp"><input id="tol" type="text" inputmode="decimal" autocomplete="off" data-u="tol">' + unitBtn('tol') + '</div>' +
+        head(2, 's2-h', 'Fully extended') +
+        '<p class="hint">Wheel off the ground. Axle to a fixed mark above it. Use the same two points from here on.</p>' +
+        '<div class="pair">' +
+          '<div data-show="rear">' + box('rear-ext', 'Rear', 'rear', 'extended') + '</div>' +
+          '<div data-show="front">' + box('front-ext', 'Front', 'front', 'extended') + '</div>' +
         '</div>' +
       '</section>' +
 
-      // 3. Rider off
       '<section class="card" aria-labelledby="s3-h">' +
-        head(3, 's3-h', 'Bike alone, no rider') +
-        '<p class="hint">Once rider sag is good. This checks whether the spring suits your weight.</p>' +
+        head(3, 's3-h', 'Aim for') +
         ENDS.map(function (end) {
-          return endSet(end,
-            pair(box({ id: end + '-fa', label: 'Lifted &amp; settled', u: 'freeA.' + end, end: end, f: 'freeA' }),
-                 box({ id: end + '-fb', label: 'Pushed &amp; returned', u: 'freeB.' + end, end: end, f: 'freeB' })) +
-            '<div id="' + end + '-free"></div>');
+          return '<fieldset class="endset" data-show="' + end + '"><legend class="end-lbl">' + NAMES[end] + '</legend>' +
+            '<div class="aim-row">' +
+              '<div class="aim" id="' + end + '-aim"></div>' +
+              box(end + '-reading', 'Your reading', end, 'reading') +
+            '</div>' +
+            '<div id="' + end + '-verdict" class="verdict-slot"></div>' +
+            '<div class="aim-row">' +
+              '<div class="aim free" id="' + end + '-free-aim"></div>' +
+              box(end + '-free', 'Your reading', end, 'free') +
+            '</div>' +
+            '<div id="' + end + '-free-verdict" class="verdict-slot"></div>' +
+          '</fieldset>';
         }).join('') +
-      '</section>' +
-
-      // 4. Write it down
-      '<details class="card more-card">' +
-        '<summary><span class="step" aria-hidden="true">4</span><span class="card-h">Note your preload</span></summary>' +
-        '<div class="more-body">' +
-          ENDS.map(function (end) {
-            return endSet(end, pair(textBox(end, 'normal', 'Normal', 'e.g. 8 clicks out'), textBox(end, 'loaded', 'Loaded', 'e.g. 3 turns')));
-          }).join('') +
-          '<p class="hint">Loaded = luggage on, or a weight on the bike with you.</p>' +
-        '</div>' +
-      '</details>';
+      '</section>';
   }
 
   // ---------- rendering ----------
   function fillInputs() {
-    each('[data-f]', function (el) {
-      var v = state[el.dataset.end][el.dataset.f];
-      if (el.dataset.u) el.value = fmtNum(v, uOf(el.dataset.u));
-      else el.value = v == null ? '' : v;
-    });
+    each('input[data-f]', function (el) { el.value = fmtNum(state[el.dataset.end][el.dataset.f], uOf(el.dataset.u)); });
     each('[data-custom]', function (el) {
       var parts = el.dataset.custom.split('.');
       var v = state.custom && state.custom[parts[0]][parts[1]];
       el.value = ok(v) ? String(v) : '';
     });
-    $('tol').value = fmtNum(state.tol, uOf('tol'));
   }
 
   function renderUnits() {
@@ -360,103 +288,72 @@
     $('custom').hidden = state.preset !== 'custom';
   }
 
+  function missing(end, s, c) {
+    if (!ok(s.travel)) return 'Enter ' + end + ' travel in step 1.';
+    if (!ok(c.p.rider)) return 'Enter a rider sag % in step 1.';
+    if (!ok(s.extended)) return 'Enter fully extended in step 2.';
+    return '';
+  }
+
   function update(end) {
-    var s = state[end], c = calc(end);
-    renderTarget(end, s, c);
-    renderResult(end, s, c);
-    renderFree(end, s, c);
-  }
+    var s = state[end], c = calc(end), need = missing(end, s, c);
+    var aim = $(end + '-aim'), faim = $(end + '-free-aim');
+    var v = $(end + '-verdict'), fv = $(end + '-free-verdict');
 
-  function renderTarget(end, s, c) {
-    var t = $(end + '-target');
-    if (!ok(s.travel) || !ok(c.p.rider)) {
-      t.className = 'target empty';
-      t.textContent = !ok(s.travel) ? 'Add ' + end + ' travel above.' : 'Add a rider sag % above.';
-    } else if (!ok(s.extended)) {
-      t.className = 'target empty';
-      t.textContent = NAMES[end] + ' target shows here.';
-    } else {
-      t.className = 'target';
-      t.innerHTML = '<span class="t-k">' + NAMES[end] + ' target</span>' +
-        '<span class="t-v">' + esc(fmtNum(c.target)) + ' <small>' + tUnit() + '</small></span>' +
-        '<span class="t-s">with you on it · ' + esc(fmtLen(c.rs)) + ' sag (' + c.p.rider + '%)</span>';
-    }
-  }
-
-  function readingOf(e) { return avg(e.a, e.b); }
-
-  function fmtTime(ts) {
-    try { return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
-    catch (e) { return ''; }
-  }
-
-  function renderResult(end, s, c) {
-    var box = $(end + '-result');
-    var e = s.log[s.log.length - 1];
-    if (!e) { box.innerHTML = ''; return; }
-
-    var r = readingOf(e), v = riderVerdict(r, c.target);
-    var del = '<button class="x" type="button" data-act="del" data-end="' + end + '" data-id="' + esc(e.id) + '" aria-label="Delete ' + end + ' reading ' + esc(fmtLen(r)) + '">×</button>';
-    var html = v
-      ? '<div class="verdict v-' + v.cls + '">' + del + '<span class="v-end">' + NAMES[end] + '</span>' +
-          '<p class="v-head"><span class="v-icon" aria-hidden="true">' + v.icon + '</span>' + v.head + '</p>' +
-          '<p class="v-sub">' + esc(v.sub) + ' <span class="v-nums">' + esc(fmtLen(r)) + ' vs ' + esc(fmtLen(c.target)) + '</span></p></div>'
-      : '<div class="verdict">' + del + '<span class="v-end">' + NAMES[end] + '</span>' +
-          '<p class="v-head">' + esc(fmtLen(r)) + '</p><p class="v-sub">Fill in step 1 to get a verdict.</p></div>';
-    if (misfit(r, s)) html += '<p class="gap">' + FIT_TEXT + '</p>';
-    if (bigGap(e.a, e.b)) html += '<p class="gap">' + GAP_TEXT + '</p>';
-
-    var older = s.log.slice(0, -1).reverse();
-    if (older.length) {
-      html += '<ul class="log" aria-label="Earlier ' + end + ' readings">';
-      older.forEach(function (o) {
-        var ro = readingOf(o), vo = riderVerdict(ro, c.target);
-        html += '<li class="row' + (vo ? ' v-' + vo.cls : '') + '">' +
-          '<span class="row-read">' + esc(fmtLen(ro)) + '</span>' +
-          '<span class="row-v">' + (vo ? '<span aria-hidden="true">' + vo.icon + '</span> ' + esc(fmtOff(ro - c.target)) : '') + '</span>' +
-          '<span class="row-meta">' + esc(fmtTime(o.ts)) + (bigGap(o.a, o.b) ? ' <span class="gap-tag">⚠ gap</span>' : '') + '</span>' +
-          '<button class="x" type="button" data-act="del" data-end="' + end + '" data-id="' + esc(o.id) + '" aria-label="Delete ' + end + ' reading ' + esc(fmtLen(ro)) + ' from ' + esc(fmtTime(o.ts)) + '">×</button>' +
-          '</li>';
-      });
-      html += '</ul>';
-    }
-    html += confirmClear[end]
-      ? '<div class="confirm"><span>Clear all ' + s.log.length + ' ' + end + ' reading' + (s.log.length === 1 ? '' : 's') + '?</span>' +
-        '<button class="btn danger" type="button" data-act="clear-yes" data-end="' + end + '">Clear</button>' +
-        '<button class="btn" type="button" data-act="clear-no" data-end="' + end + '">Cancel</button></div>'
-      : '<button class="btn link" type="button" data-act="clear-ask" data-end="' + end + '">Clear ' + end + ' readings</button>';
-    box.innerHTML = html;
-  }
-
-  function renderFree(end, s, c) {
-    var box = $(end + '-free');
-    var r = avg(s.freeA, s.freeB), v = ok(r) ? freeVerdict(r, c) : null;
-    var win = ok(c.t1) ? fmtNum(c.t2) + ' to ' + fmtLen(c.t1) : '';
-    var html;
-    if (!v) {
-      html = win ? '<p class="hint">Aim for ' + esc(win) + '.</p>' : '';
-    } else {
-      html = '<div class="verdict small v-' + v.cls + '">' +
-        '<p class="v-head">' + esc(v.head) + '</p>' +
-        (v.sub ? '<p class="v-sub">' + esc(v.sub) + '</p>' : '') +
-        '<p class="v-sub"><span class="v-nums">' + esc(fmtLen(r)) + ' · aim for ' + esc(win) + '</span></p></div>';
-    }
-    if (ok(r) && misfit(r, s)) html += '<p class="gap">' + FIT_TEXT + '</p>';
-    if (bigGap(s.freeA, s.freeB)) html += '<p class="gap">' + GAP_TEXT + '</p>';
-    box.innerHTML = html;
-  }
-
-  function updatePreview(end) {
-    var a = $(end + '-a'), b = $(end + '-b'), el = $(end + '-preview');
-    $('add-err').hidden = true;
-    if (unreadable(a) || unreadable(b)) {
-      el.innerHTML = '<span class="gap-tag">Can’t read that. Try 21.5 or 21 1/2</span>';
+    if (need) {
+      aim.className = 'aim empty';
+      aim.innerHTML = '<span class="aim-k">With you on it</span><span class="aim-need">' + esc(need) + '</span>';
+      faim.className = 'aim free empty';
+      faim.innerHTML = '<span class="aim-k">Bike alone</span><span class="aim-need">—</span>';
+      v.innerHTML = ''; fv.innerHTML = '';
       return;
     }
-    var va = boxVal(a), vb = boxVal(b);
-    if (!(ok(va) && ok(vb))) { el.innerHTML = ''; return; }
-    el.innerHTML = 'Average <strong>' + esc(fmtLen(avg(va, vb))) + '</strong>' +
-      (bigGap(va, vb) ? '<br><span class="gap">' + GAP_TEXT + '</span>' : '');
+
+    // with rider
+    aim.className = 'aim';
+    aim.innerHTML = '<span class="aim-k">With you on it</span>' +
+      '<span class="aim-v">' + esc(fmtNum(c.target)) + ' <small>' + tUnit() + '</small></span>' +
+      '<span class="aim-s">' + esc(fmtLen(c.rs)) + ' sag (' + c.p.rider + '%)</span>';
+
+    var el = $(end + '-reading');
+    if (unreadable(el)) {
+      v.innerHTML = '<p class="gap">Can’t read that. Try 21.5 or 21 1/2.</p>';
+    } else if (c.target <= 0) {
+      v.innerHTML = '<p class="gap">Fully extended is less than the sag. Check the mm / in switch.</p>';
+    } else if (!ok(s.reading)) {
+      v.innerHTML = '';
+    } else {
+      var rv = riderVerdict(s.reading, c.target);
+      v.innerHTML = '<div class="verdict v-' + rv.cls + '">' +
+        '<p class="v-head"><span class="v-icon" aria-hidden="true">' + rv.icon + '</span>' + rv.head +
+          (rv.how ? ' <span class="v-how">(' + rv.how + ')</span>' : '') + '</p>' +
+        '<p class="v-sub">' + esc(rv.sub) + '</p></div>' +
+        (s.reading > s.extended + 2 ? '<p class="gap">' + FIT_TEXT + '</p>' : '');
+    }
+
+    // bike alone
+    if (!ok(c.t1)) {
+      faim.className = 'aim free empty';
+      faim.innerHTML = '<span class="aim-k">Bike alone</span><span class="aim-need">Enter free sag % in step 1.</span>';
+      fv.innerHTML = '';
+      return;
+    }
+    faim.className = 'aim free';
+    faim.innerHTML = '<span class="aim-k">Bike alone</span>' +
+      '<span class="aim-v">' + esc(fmtNum(c.t2)) + '–' + esc(fmtNum(c.t1)) + ' <small>' + tUnit() + '</small></span>' +
+      '<span class="aim-s">' + c.lo + '–' + c.hi + '% free sag</span>';
+
+    var fel = $(end + '-free');
+    if (unreadable(fel)) {
+      fv.innerHTML = '<p class="gap">Can’t read that. Try 21.5 or 21 1/2.</p>';
+    } else if (!ok(s.free)) {
+      fv.innerHTML = '';
+    } else {
+      var f = freeVerdict(s.free, c);
+      fv.innerHTML = '<div class="verdict small v-' + f.cls + '"><p class="v-head">' + esc(f.head) + '</p>' +
+        (f.sub ? '<p class="v-sub">' + esc(f.sub) + '</p>' : '') + '</div>' +
+        (s.free > s.extended + 2 ? '<p class="gap">' + FIT_TEXT + '</p>' : '');
+    }
   }
 
   function renderAll() {
@@ -469,29 +366,9 @@
 
   function showStorageWarn() { if (!storageOk) $('storage-warn').hidden = false; }
 
-  // Change units without losing readings typed into the unsaved "add reading" boxes.
-  function switchUnits(change) {
-    var boxes = Array.prototype.slice.call(document.querySelectorAll('#add input[data-u]'));
-    var held = boxes.map(function (el) { return unreadable(el) ? undefined : boxVal(el); });
-    change();
-    save();
-    renderUnits();
-    fillInputs();
-    boxes.forEach(function (el, i) { if (held[i] !== undefined) el.value = fmtNum(held[i], uOf(el.dataset.u)); });
-    ENDS.forEach(function (end) { updatePreview(end); update(end); });
-  }
-
   // ---------- events ----------
   document.addEventListener('input', function (e) {
     var el = e.target;
-    if (el.form && el.form.id === 'add') { updatePreview(el.dataset.end); return; }
-
-    if (el.id === 'tol') {
-      state.tol = boxVal(el);
-      save();
-      ENDS.forEach(update);
-      return;
-    }
     if (el.dataset.custom) {
       var parts = el.dataset.custom.split('.');
       state.custom[parts[0]][parts[1]] = parseNum(el.value);
@@ -501,7 +378,7 @@
     }
     var end = el.dataset.end, f = el.dataset.f;
     if (!end || !f) return;
-    state[end][f] = el.dataset.u ? boxVal(el) : el.value;
+    state[end][f] = boxVal(el);
     save();
     update(end);
   });
@@ -521,55 +398,21 @@
     ENDS.forEach(update);
   });
 
-  document.addEventListener('submit', function (e) {
-    if (e.target.id !== 'add') return;
-    e.preventDefault();
-    var err = $('add-err'), ends = ENDS.filter(shown);
-
-    var bad = ends.some(function (end) { return unreadable($(end + '-a')) || unreadable($(end + '-b')); });
-    if (bad) { err.textContent = 'Can’t read one of those numbers. Try 21.5 or 21 1/2.'; err.hidden = false; return; }
-
-    var added = [];
-    ends.forEach(function (end) {
-      var a = boxVal($(end + '-a')), b = boxVal($(end + '-b'));
-      if (!ok(a) && !ok(b)) return;
-      state[end].log.push({ id: uid(), ts: Date.now(), a: a, b: b });
-      confirmClear[end] = false;
-      $(end + '-a').value = '';
-      $(end + '-b').value = '';
-      added.push(end);
-    });
-    if (!added.length) { err.textContent = 'Enter a reading first.'; err.hidden = false; return; }
-
-    save();
-    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    $('status').textContent = added.map(function (end) {
-      var s = state[end], r = readingOf(s.log[s.log.length - 1]), v = riderVerdict(r, calc(end).target);
-      updatePreview(end);
-      update(end);
-      return NAMES[end] + ' ' + fmtLen(r) + ': ' + (v ? v.head + '. ' + v.sub : 'added.');
-    }).join(' ');
-    $(added[0] + '-result').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  });
-
   document.addEventListener('click', function (e) {
     var btn = e.target.closest('[data-act]');
     if (!btn) return;
-    var end = btn.dataset.end;
-
     switch (btn.dataset.act) {
       case 'unit':
         if (state.units === btn.dataset.unit) return;
-        switchUnits(function () { state.units = btn.dataset.unit; });
+        state.units = btn.dataset.unit;
+        save();
+        renderUnits();
+        fillInputs();
+        ENDS.forEach(update);
         break;
       case 'box-unit':
+        // Keep what's typed and read it in the new unit (24 mm -> 24 in, not 0.94 in).
         var key = btn.dataset.u;
-        if (key === 'tol') {
-          // Tolerance is a preset distance (3 mm), not a measurement: convert it (3 mm -> 1/8 in).
-          switchUnits(function () { state.fieldUnits.tol = uOf('tol') === 'mm' ? 'in' : 'mm'; });
-          break;
-        }
-        // Measurements: keep what's typed and read it in the new unit (24 mm -> 24 in, not 0.94 in).
         state.fieldUnits[key] = uOf(key) === 'mm' ? 'in' : 'mm';
         save();
         renderUnits();
@@ -579,20 +422,6 @@
         state.which = btn.dataset.which;
         save();
         renderWhich();
-        break;
-      case 'del':
-        state[end].log = state[end].log.filter(function (x) { return x.id !== btn.dataset.id; });
-        if (!state[end].log.length) confirmClear[end] = false;
-        save();
-        update(end);
-        break;
-      case 'clear-ask': confirmClear[end] = true; update(end); break;
-      case 'clear-no': confirmClear[end] = false; update(end); break;
-      case 'clear-yes':
-        state[end].log = [];
-        confirmClear[end] = false;
-        save();
-        update(end);
         break;
     }
   });

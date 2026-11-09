@@ -366,3 +366,29 @@ input::placeholder { color: var(--placeholder); opacity: 1; font-weight: 400; }
 .more-card summary::after { content: "▾"; margin-left: auto; color: var(--muted); }
 .more-card[open] summary::after { transform: rotate(180deg); }
 .more-card .more-body { display: grid; gap: 12px; padding: 0 16px 16px; }
+
+/* ---------- aim for: target beside your reading ---------- */
+.endset + .endset { border-top: 1px solid var(--line); padding-top: 14px; }
+.endset { gap: 10px; }
+.aim-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: end; }
+.aim {
+  display: grid; align-content: center;
+  min-height: 84px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--accent-tint);
+  min-width: 0;
+}
+.aim.free { background: var(--surface-2); min-height: 74px; }
+.aim.empty { background: var(--surface-2); }
+.aim-k { color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+.aim-v { font-size: 1.75rem; font-weight: 800; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.aim.free .aim-v { font-size: 1.25rem; }
+.aim-v small { font-size: 0.5em; font-weight: 600; color: var(--muted); }
+.aim.free .aim-v small { font-size: 0.7em; }
+.aim-s { color: var(--muted); font-size: 0.8rem; }
+.aim-need { color: var(--muted); font-size: 0.85rem; }
+.verdict-slot { display: grid; gap: 6px; }
+.verdict-slot:empty { display: none; }
+.verdict-slot .verdict { padding-right: 16px; }
+.v-how { font-size: 0.6em; font-weight: 600; }
