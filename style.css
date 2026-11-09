@@ -118,8 +118,8 @@ legend { padding: 0; }
 }
 .card-h { font-size: 1.3rem; letter-spacing: -0.01em; }
 
-.end-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.aside { flex-basis: 100%; color: var(--muted); font-size: 0.85rem; margin-top: -6px; }
+.stage-head { display: flex; align-items: center; gap: 10px; }
+.stage-head + .hint { margin-top: -6px; }
 .step {
   display: inline-grid; place-items: center;
   width: 28px; height: 28px; border-radius: 50%;
@@ -133,9 +133,12 @@ legend { padding: 0; }
 .lbl.sm { font-weight: 500; font-size: 0.85rem; color: var(--muted); }
 .hint { color: var(--muted); font-size: 0.85rem; }
 .setup > .hint { margin-top: -8px; }
+.pair:has(> [hidden]) { grid-template-columns: minmax(0, 1fr); }
+.endset { display: grid; gap: 6px; }
+.end-lbl { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 4px; }
+.pair .inp input { font-size: 1.05rem; }
 
 .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
-fieldset > .pair { margin-top: 8px; }
 
 .inp { position: relative; display: block; min-width: 0; }
 .inp input { padding-right: 48px; }
@@ -143,7 +146,7 @@ fieldset > .pair { margin-top: 8px; }
   position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
   color: var(--muted); font-size: 0.95rem; pointer-events: none;
 }
-.inp:has(button.u) input { padding-right: 70px; }
+.inp:has(button.u) input { padding-right: 62px; padding-left: 10px; }
 /* compact mm | in switch inside a box; active unit filled */
 .inp button.u {
   position: absolute; right: 5px; top: 6px; bottom: 6px;
@@ -154,7 +157,7 @@ fieldset > .pair { margin-top: 8px; }
   font: 600 0.8rem var(--font);
   cursor: pointer;
 }
-.inp button.u span { display: grid; place-items: center; min-width: 27px; border-radius: 5px; color: var(--muted); }
+.inp button.u span { display: grid; place-items: center; min-width: 24px; border-radius: 5px; color: var(--muted); }
 .inp button.u span.on { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 
 input:not([type="radio"]) {
@@ -341,3 +344,25 @@ input::placeholder { color: var(--placeholder); opacity: 1; font-weight: 400; }
   .t-v { font-size: 2.1rem; }
   .v-head { font-size: 1.4rem; }
 }
+
+/* ---------- stage flow ---------- */
+.add { display: grid; gap: 12px; }
+.add .add-btn { margin-top: 0; }
+.result { display: grid; gap: 8px; }
+.result:empty { display: none; }
+.v-end { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.target { min-width: 0; }
+.pair > .target .t-v { font-size: 1.9rem; }
+.target.empty { font-size: 0.9rem; }
+.tol { padding-top: 4px; border-top: 1px solid var(--line); padding-top: 12px; }
+
+.more-card { display: block; padding: 0; }
+.more-card summary {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 60px; padding: 0 16px;
+  cursor: pointer; list-style: none;
+}
+.more-card summary::-webkit-details-marker { display: none; }
+.more-card summary::after { content: "▾"; margin-left: auto; color: var(--muted); }
+.more-card[open] summary::after { transform: rotate(180deg); }
+.more-card .more-body { display: grid; gap: 12px; padding: 0 16px 16px; }
