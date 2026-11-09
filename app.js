@@ -36,7 +36,7 @@
     }
   };
 
-  var FIT_TEXT = 'Longer than fully extended. Check the mm / in switch.';
+  var FIT_TEXT = 'Longer than fully extended. Check the mm / in switch';
 
   // ---------- helpers ----------
   function ok(v) { return typeof v === 'number' && isFinite(v); }
@@ -192,17 +192,17 @@
 
   function riderVerdict(r, target, u) {
     var off = r - target;
-    if (off < -TOL_MM - EPS) return { cls: 'adjust', icon: '▲', head: 'ADD preload', how: 'tighten', sub: 'Sitting too low by ' + fmtLen(-off, u) + '.' };
-    if (off > TOL_MM + EPS) return { cls: 'adjust', icon: '▼', head: 'REDUCE preload', how: 'loosen', sub: 'Sitting too high by ' + fmtLen(off, u) + '.' };
-    return { cls: 'good', icon: '✓', head: 'Call it good', how: '', sub: 'Within ' + fmtLen(TOL_MM, u) + '.' };
+    if (off < -TOL_MM - EPS) return { cls: 'adjust', icon: '▲', head: 'Add preload', how: 'tighten', detail: fmtLen(-off, u) + ' too low' };
+    if (off > TOL_MM + EPS) return { cls: 'adjust', icon: '▼', head: 'Reduce preload', how: 'loosen', detail: fmtLen(off, u) + ' too high' };
+    return { cls: 'good', icon: '✓', head: 'Call it good', how: '', detail: 'within ' + fmtLen(TOL_MM, u) };
   }
 
   function freeVerdict(r, c) {
-    if (r > c.t1 + EPS) return { cls: 'adjust', head: 'Stiffer spring',
-      sub: 'Too little free sag: spring too light for your weight. Until then, keep rider sag right and ride it.' };
-    if (r < c.t2 - EPS) return { cls: 'adjust', head: 'Softer spring',
-      sub: 'Too much free sag: spring too heavy for your weight. Until then, set preload for rider sag and ride it.' };
-    return { cls: 'good', head: "Spring's right for you.", sub: '' };
+    if (r > c.t1 + EPS) return { cls: 'adjust', icon: '!', head: 'Stiffer spring', how: '',
+      detail: 'Too little free sag: spring too light for your weight. Until then, keep rider sag right and ride it.' };
+    if (r < c.t2 - EPS) return { cls: 'adjust', icon: '!', head: 'Softer spring', how: '',
+      detail: 'Too much free sag: spring too heavy for your weight. Until then, set preload for rider sag and ride it.' };
+    return { cls: 'good', icon: '✓', head: "Spring's right for you", how: '', detail: '' };
   }
 
   // ---------- markup ----------
@@ -235,6 +235,19 @@
       '<label class="prow"><span class="pn"><input type="radio" name="preset" value="custom">Custom</span><span class="pc wide"><small>Your own numbers</small></span></label>';
   }
 
+  // One check: label + target on a line, reading box, one status line.
+  function checkHTML(end, f, label) {
+    var id = end + '-' + f, key = f + '.' + end;
+    return '<div class="check" id="' + id + '-check">' +
+      '<div class="check-head"><span class="check-k">' + label + '</span><span class="check-v" id="' + id + '-aim"></span></div>' +
+      '<p class="check-s" id="' + id + '-aim-s"></p>' +
+      '<label class="sr-only" for="' + id + '">' + NAMES[end] + ' reading, ' + label.toLowerCase() + '</label>' +
+      '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" placeholder="Your reading" data-end="' + end + '" data-f="' + f + '" data-u="' + key + '">' +
+        '<span class="suf" data-unit-of="' + key + '"></span></div>' +
+      '<p class="status" id="' + id + '-status"></p>' +
+    '</div>';
+  }
+
   function flowHTML() {
     return '' +
       '<section class="card" aria-labelledby="s2-h">' +
@@ -250,16 +263,7 @@
         head(3, 's3-h', 'Aim for') +
         ENDS.map(function (end) {
           return '<fieldset class="endset" data-show="' + end + '"><legend class="end-lbl">' + NAMES[end] + '</legend>' +
-            '<div class="aim-row">' +
-              '<div class="aim" id="' + end + '-aim"></div>' +
-              box(end + '-reading', 'Your reading', end, 'reading') +
-            '</div>' +
-            '<div id="' + end + '-verdict" class="verdict-slot"></div>' +
-            '<div class="aim-row">' +
-              '<div class="aim free" id="' + end + '-free-aim"></div>' +
-              box(end + '-free', 'Your reading', end, 'free') +
-            '</div>' +
-            '<div id="' + end + '-free-verdict" class="verdict-slot"></div>' +
+            '<div class="checks">' + checkHTML(end, 'reading', 'With you on it') + checkHTML(end, 'free', 'Bike alone') + '</div>' +
           '</fieldset>';
         }).join('') +
       '</section>';
@@ -298,76 +302,56 @@
   }
 
   function missing(end, s, c) {
-    if (!ok(s.travel)) return 'Enter ' + end + ' travel in step 1.';
-    if (!ok(c.p.rider)) return 'Enter a rider sag % in step 1.';
-    if (!ok(s.extended)) return 'Enter fully extended in step 2.';
+    if (!ok(s.travel)) return 'Enter ' + end + ' travel in step 1';
+    if (!ok(c.p.rider)) return 'Enter a rider sag % in step 1';
+    if (!ok(s.extended)) return 'Enter fully extended in step 2';
     return '';
   }
 
+  function setCheck(id, o) {
+    $(id + '-check').className = 'check' + (o.cls ? ' v-' + o.cls : '');
+    $(id + '-aim').innerHTML = o.aim || '';
+    $(id + '-aim-s').innerHTML = o.sub || '';
+    var st = $(id + '-status');
+    st.innerHTML = o.status || '';
+    st.hidden = !o.status;
+  }
+
+  function statusHTML(v) {
+    return '<span class="st-head"><span class="st-icon" aria-hidden="true">' + v.icon + '</span>' + esc(v.head) + '</span>' +
+      (v.how ? '<span class="st-how">' + v.how + '</span>' : '') +
+      (v.detail ? '<span class="st-detail' + (v.detail.length > 30 ? ' long' : '') + '">' + numText(v.detail) + '</span>' : '');
+  }
+  function warnHTML(text) { return '<span class="st-head"><span class="st-icon" aria-hidden="true">!</span>' + esc(text) + '</span>'; }
+
   function update(end) {
-    var s = state[end], c = calc(end), need = missing(end, s, c);
-    var aim = $(end + '-aim'), faim = $(end + '-free-aim');
-    var v = $(end + '-verdict'), fv = $(end + '-free-verdict');
+    var s = state[end], c = calc(end), need = missing(end, s, c), u = uOf('extended.' + end);
+    var rid = end + '-reading', fid = end + '-free';
 
     if (need) {
-      aim.className = 'aim empty';
-      aim.innerHTML = '<span class="aim-k">With you on it</span><span class="aim-need">' + esc(need) + '</span>';
-      faim.className = 'aim free empty';
-      faim.innerHTML = '<span class="aim-k">Bike alone</span><span class="aim-need">—</span>';
-      v.innerHTML = ''; fv.innerHTML = '';
+      setCheck(rid, { sub: esc(need) });
+      setCheck(fid, {});
       return;
     }
 
     // with rider
-    var au = uOf('extended.' + end);
-    aim.className = 'aim';
-    aim.innerHTML = '<span class="aim-k">With you on it</span>' +
-      '<span class="aim-v">' + num(fmtNum(c.target, au)) + ' <small>' + au + '</small></span>' +
-      '<span class="aim-s">' + num(fmtNum(s.extended, au)) + ' − ' + num(fmtNum(c.rs, au)) + ' sag (' + c.p.rider + '%)</span>';
-
-    var el = $(end + '-reading');
-    if (unreadable(el)) {
-      v.innerHTML = '<p class="gap">Can’t read that. Try 21.5 or 21 1/2.</p>';
-    } else if (c.target <= 0) {
-      v.innerHTML = '<p class="gap">Fully extended is less than the sag. Check the mm / in switch.</p>';
-    } else if (!ok(s.reading)) {
-      v.innerHTML = '';
-    } else {
-      var rv = riderVerdict(s.reading, c.target, au);
-      v.innerHTML = '<div class="verdict v-' + rv.cls + '">' +
-        '<p class="v-head"><span class="v-icon" aria-hidden="true">' + rv.icon + '</span>' + rv.head +
-          (rv.how ? ' <span class="v-how">(' + rv.how + ')</span>' : '') + '</p>' +
-        '<p class="v-sub">' + numText(rv.sub) + '</p></div>' +
-        (s.reading > s.extended + 2 ? '<p class="gap">' + FIT_TEXT + '</p>' : '');
-    }
+    var r = { aim: num(fmtNum(c.target, u)) + ' <small>' + u + '</small>',
+              sub: num(fmtNum(s.extended, u)) + ' − ' + num(fmtNum(c.rs, u)) + ' sag (' + c.p.rider + '%)' };
+    if (unreadable($(rid))) { r.cls = 'warn'; r.status = warnHTML('Can’t read that. Try 21.5 or 21 1/2'); }
+    else if (c.target <= 0) { r.cls = 'warn'; r.status = warnHTML('Fully extended is less than the sag. Check the mm / in switch'); }
+    else if (ok(s.reading) && s.reading > s.extended + 2) { r.cls = 'warn'; r.status = warnHTML(FIT_TEXT); }
+    else if (ok(s.reading)) { var rv = riderVerdict(s.reading, c.target, u); r.cls = rv.cls; r.status = statusHTML(rv); }
+    setCheck(rid, r);
 
     // bike alone
-    if (!ok(c.t1)) {
-      faim.className = 'aim free empty';
-      faim.innerHTML = '<span class="aim-k">Bike alone</span><span class="aim-need">Enter free sag % in step 1.</span>';
-      fv.innerHTML = '';
-      return;
-    }
-    var fu = au;
-    faim.className = 'aim free';
-    faim.innerHTML = '<span class="aim-k">Bike alone</span>' +
-      // window shown as centre ± half-width, the way you'd mark it on a tape (570–580 -> 575 ± 5)
-      '<span class="aim-v">' + num(fmtNum((c.t1 + c.t2) / 2, fu)) +
-        (fmtNum((c.t1 - c.t2) / 2, fu) !== '0' ? ' <small class="pm">± ' + num(fmtNum((c.t1 - c.t2) / 2, fu)) + '</small>' : '') +
-        ' <small>' + fu + '</small></span>' +
-      '<span class="aim-s">' + c.lo + '–' + c.hi + '% free sag</span>';
-
-    var fel = $(end + '-free');
-    if (unreadable(fel)) {
-      fv.innerHTML = '<p class="gap">Can’t read that. Try 21.5 or 21 1/2.</p>';
-    } else if (!ok(s.free)) {
-      fv.innerHTML = '';
-    } else {
-      var f = freeVerdict(s.free, c);
-      fv.innerHTML = '<div class="verdict small v-' + f.cls + '"><p class="v-head">' + esc(f.head) + '</p>' +
-        (f.sub ? '<p class="v-sub">' + esc(f.sub) + '</p>' : '') + '</div>' +
-        (s.free > s.extended + 2 ? '<p class="gap">' + FIT_TEXT + '</p>' : '');
-    }
+    if (!ok(c.t1)) { setCheck(fid, { sub: 'Enter free sag % in step 1' }); return; }
+    var half = fmtNum((c.t1 - c.t2) / 2, u);
+    var f = { aim: num(fmtNum((c.t1 + c.t2) / 2, u)) + (half !== '0' ? ' <small>± ' + num(half) + '</small>' : '') + ' <small>' + u + '</small>',
+              sub: c.lo + '–' + c.hi + '% free sag' };
+    if (unreadable($(fid))) { f.cls = 'warn'; f.status = warnHTML('Can’t read that. Try 21.5 or 21 1/2'); }
+    else if (ok(s.free) && s.free > s.extended + 2) { f.cls = 'warn'; f.status = warnHTML(FIT_TEXT); }
+    else if (ok(s.free)) { var fv = freeVerdict(s.free, c); f.cls = fv.cls; f.status = statusHTML(fv); }
+    setCheck(fid, f);
   }
 
   function renderAll() {
