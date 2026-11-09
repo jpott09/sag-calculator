@@ -530,8 +530,13 @@
         switchUnits(function () { state.units = btn.dataset.unit; });
         break;
       case 'box-unit':
-        // Keep what's typed and read it in the new unit (24 mm -> 24 in, not 0.94 in).
         var key = btn.dataset.u;
+        if (key === 'tol') {
+          // Tolerance is a preset distance (3 mm), not a measurement: convert it (3 mm -> 0.12 in).
+          switchUnits(function () { state.fieldUnits.tol = uOf('tol') === 'mm' ? 'in' : 'mm'; });
+          break;
+        }
+        // Measurements: keep what's typed and read it in the new unit (24 mm -> 24 in, not 0.94 in).
         state.fieldUnits[key] = uOf(key) === 'mm' ? 'in' : 'mm';
         save();
         renderUnits();
