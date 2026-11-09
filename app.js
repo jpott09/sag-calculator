@@ -182,11 +182,11 @@
     return o;
   }
 
-  function riderVerdict(r, target) {
+  function riderVerdict(r, target, u) {
     var off = r - target;
-    if (off < -TOL_MM - EPS) return { cls: 'adjust', icon: '▲', head: 'ADD preload', how: 'tighten', sub: 'Sitting too low by ' + fmtLen(-off) + '.' };
-    if (off > TOL_MM + EPS) return { cls: 'adjust', icon: '▼', head: 'REDUCE preload', how: 'loosen', sub: 'Sitting too high by ' + fmtLen(off) + '.' };
-    return { cls: 'good', icon: '✓', head: 'Call it good', how: '', sub: 'Within ' + fmtLen(TOL_MM) + '.' };
+    if (off < -TOL_MM - EPS) return { cls: 'adjust', icon: '▲', head: 'ADD preload', how: 'tighten', sub: 'Sitting too low by ' + fmtLen(-off, u) + '.' };
+    if (off > TOL_MM + EPS) return { cls: 'adjust', icon: '▼', head: 'REDUCE preload', how: 'loosen', sub: 'Sitting too high by ' + fmtLen(off, u) + '.' };
+    return { cls: 'good', icon: '✓', head: 'Call it good', how: '', sub: 'Within ' + fmtLen(TOL_MM, u) + '.' };
   }
 
   function freeVerdict(r, c) {
@@ -199,6 +199,12 @@
 
   // ---------- markup ----------
   function unitBtn(key) { return '<button type="button" class="u" data-act="box-unit" data-u="' + key + '"></button>'; }
+  // Same mm|in switch for a result tile; built filled-in because tiles re-render on every keystroke.
+  function aimBtn(key) {
+    var u = uOf(key);
+    return '<button type="button" class="u" data-act="aim-unit" data-u="' + key + '" aria-label="Show in ' + (u === 'in' ? 'millimetres' : 'inches') + '">' +
+      '<span' + (u === 'mm' ? ' class="on"' : '') + '>mm</span><span' + (u === 'in' ? ' class="on"' : '') + '>in</span></button>';
+  }
 
   function box(id, label, end, f) {
     var key = f + '.' + end;
@@ -310,10 +316,11 @@
     }
 
     // with rider
+    var au = uOf('aim.' + end);
     aim.className = 'aim';
-    aim.innerHTML = '<span class="aim-k">With you on it</span>' +
-      '<span class="aim-v">' + esc(fmtNum(c.target)) + ' <small>' + tUnit() + '</small></span>' +
-      '<span class="aim-s">' + esc(fmtNum(s.extended)) + ' − ' + esc(fmtNum(c.rs)) + ' sag (' + c.p.rider + '%)</span>';
+    aim.innerHTML = '<span class="aim-top"><span class="aim-k">With you on it</span>' + aimBtn('aim.' + end) + '</span>' +
+      '<span class="aim-v">' + esc(fmtNum(c.target, au)) + ' <small>' + au + '</small></span>' +
+      '<span class="aim-s">' + esc(fmtNum(s.extended, au)) + ' − ' + esc(fmtNum(c.rs, au)) + ' sag (' + c.p.rider + '%)</span>';
 
     var el = $(end + '-reading');
     if (unreadable(el)) {
@@ -323,7 +330,7 @@
     } else if (!ok(s.reading)) {
       v.innerHTML = '';
     } else {
-      var rv = riderVerdict(s.reading, c.target);
+      var rv = riderVerdict(s.reading, c.target, au);
       v.innerHTML = '<div class="verdict v-' + rv.cls + '">' +
         '<p class="v-head"><span class="v-icon" aria-hidden="true">' + rv.icon + '</span>' + rv.head +
           (rv.how ? ' <span class="v-how">(' + rv.how + ')</span>' : '') + '</p>' +
@@ -338,9 +345,10 @@
       fv.innerHTML = '';
       return;
     }
+    var fu = uOf('freeaim.' + end);
     faim.className = 'aim free';
-    faim.innerHTML = '<span class="aim-k">Bike alone</span>' +
-      '<span class="aim-v">' + esc(fmtNum(c.t2)) + '–' + esc(fmtNum(c.t1)) + ' <small>' + tUnit() + '</small></span>' +
+    faim.innerHTML = '<span class="aim-top"><span class="aim-k">Bike alone</span>' + aimBtn('freeaim.' + end) + '</span>' +
+      '<span class="aim-v">' + esc(fmtNum(c.t2, fu)) + '–' + esc(fmtNum(c.t1, fu)) + ' <small>' + fu + '</small></span>' +
       '<span class="aim-s">' + c.lo + '–' + c.hi + '% free sag</span>';
 
     var fel = $(end + '-free');
@@ -417,6 +425,15 @@
         save();
         renderUnits();
         btn.parentNode.querySelector('input').dispatchEvent(new Event('input', { bubbles: true }));
+        break;
+      case 'aim-unit':
+        // Display only: the target is the same, shown in the other unit.
+        var ak = btn.dataset.u;
+        state.fieldUnits[ak] = uOf(ak) === 'mm' ? 'in' : 'mm';
+        save();
+        update(ak.split('.')[1]);
+        var again = document.querySelector('[data-act="aim-unit"][data-u="' + ak + '"]');
+        if (again) again.focus();
         break;
       case 'which':
         state.which = btn.dataset.which;
