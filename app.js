@@ -118,7 +118,13 @@
   // state.units: results, and the default for any box the user hasn't switched.
   // state.fieldUnits['extended.rear'] etc: that one box's own unit.
   function tUnit() { return state.units; }
-  function uOf(key) { return state.fieldUnits[key] || state.units; }
+  // Readings and targets follow that end's fully extended box: you measure and aim in one unit.
+  function uOf(key) {
+    if (state.fieldUnits[key]) return state.fieldUnits[key];
+    var parts = key.split('.');
+    if (parts[0] === 'reading' || parts[0] === 'free') return uOf('extended.' + parts[1]);
+    return state.units;
+  }
 
   // Inches read like a tape: nearest 1/16, reduced (21 3/8).
   function fmtIn(x) {
@@ -199,13 +205,6 @@
 
   // ---------- markup ----------
   function unitBtn(key) { return '<button type="button" class="u" data-act="box-unit" data-u="' + key + '"></button>'; }
-  // Same mm|in switch for a result tile; built filled-in because tiles re-render on every keystroke.
-  function aimBtn(key) {
-    var u = uOf(key);
-    return '<button type="button" class="u" data-act="aim-unit" data-u="' + key + '" aria-label="Show in ' + (u === 'in' ? 'millimetres' : 'inches') + '">' +
-      '<span' + (u === 'mm' ? ' class="on"' : '') + '>mm</span><span' + (u === 'in' ? ' class="on"' : '') + '>in</span></button>';
-  }
-
   function box(id, label, end, f) {
     var key = f + '.' + end;
     return '<div class="field">' +
@@ -316,9 +315,9 @@
     }
 
     // with rider
-    var au = uOf('aim.' + end);
+    var au = uOf('extended.' + end);
     aim.className = 'aim';
-    aim.innerHTML = '<span class="aim-top"><span class="aim-k">With you on it</span>' + aimBtn('aim.' + end) + '</span>' +
+    aim.innerHTML = '<span class="aim-k">With you on it</span>' +
       '<span class="aim-v">' + esc(fmtNum(c.target, au)) + ' <small>' + au + '</small></span>' +
       '<span class="aim-s">' + esc(fmtNum(s.extended, au)) + ' − ' + esc(fmtNum(c.rs, au)) + ' sag (' + c.p.rider + '%)</span>';
 
@@ -345,9 +344,9 @@
       fv.innerHTML = '';
       return;
     }
-    var fu = uOf('freeaim.' + end);
+    var fu = au;
     faim.className = 'aim free';
-    faim.innerHTML = '<span class="aim-top"><span class="aim-k">Bike alone</span>' + aimBtn('freeaim.' + end) + '</span>' +
+    faim.innerHTML = '<span class="aim-k">Bike alone</span>' +
       '<span class="aim-v">' + esc(fmtNum(c.t2, fu)) + '–' + esc(fmtNum(c.t1, fu)) + ' <small>' + fu + '</small></span>' +
       '<span class="aim-s">' + c.lo + '–' + c.hi + '% free sag</span>';
 
@@ -425,15 +424,13 @@
         save();
         renderUnits();
         btn.parentNode.querySelector('input').dispatchEvent(new Event('input', { bubbles: true }));
-        break;
-      case 'aim-unit':
-        // Display only: the target is the same, shown in the other unit.
-        var ak = btn.dataset.u;
-        state.fieldUnits[ak] = uOf(ak) === 'mm' ? 'in' : 'mm';
-        save();
-        update(ak.split('.')[1]);
-        var again = document.querySelector('[data-act="aim-unit"][data-u="' + ak + '"]');
-        if (again) again.focus();
+        // Reading boxes that follow this end's fully extended unit re-read what's typed, too.
+        if (key.indexOf('extended.') === 0) {
+          var e2 = key.split('.')[1];
+          ['reading', 'free'].forEach(function (f) {
+            if (!state.fieldUnits[f + '.' + e2]) $(e2 + '-' + f).dispatchEvent(new Event('input', { bubbles: true }));
+          });
+        }
         break;
       case 'which':
         state.which = btn.dataset.which;

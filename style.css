@@ -392,14 +392,3 @@ input::placeholder { color: var(--placeholder); opacity: 1; font-weight: 400; }
 .verdict-slot:empty { display: none; }
 .verdict-slot .verdict { padding-right: 16px; }
 .v-how { font-size: 0.6em; font-weight: 600; }
-.aim-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
-.aim button.u {
-  display: flex; gap: 2px; padding: 2px; flex: none;
-  height: 34px;
-  border: 1px solid var(--field-line); border-radius: 8px;
-  background: var(--surface);
-  font: 600 0.8rem var(--font);
-  cursor: pointer;
-}
-.aim button.u span { display: grid; place-items: center; min-width: 24px; border-radius: 5px; color: var(--muted); }
-.aim button.u span.on { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
