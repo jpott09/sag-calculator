@@ -123,10 +123,9 @@
   function tUnit() { return state.units; }
   // Readings and targets follow that end's fully extended box: you measure and aim in one unit.
   function uOf(key) {
-    if (state.fieldUnits[key]) return state.fieldUnits[key];
     var parts = key.split('.');
-    if (parts[0] === 'reading' || parts[0] === 'free') return uOf('extended.' + parts[1]);
-    return state.units;
+    if (parts[0] === 'reading' || parts[0] === 'free') return uOf('extended.' + parts[1]); // no switch of their own
+    return state.fieldUnits[key] || state.units;
   }
 
   // Inches read like a tape: nearest 1/16, reduced (21 3/8).
@@ -212,7 +211,8 @@
     var key = f + '.' + end;
     return '<div class="field">' +
       '<label class="lbl sm" for="' + id + '">' + label + '</label>' +
-      '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-u="' + key + '">' + unitBtn(key) + '</div></div>';
+      '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-u="' + key + '">' +
+        (f === 'reading' || f === 'free' ? '<span class="suf" data-unit-of="' + key + '"></span>' : unitBtn(key)) + '</div></div>';
   }
   function head(n, id, title) {
     return '<div class="stage-head"><span class="step" aria-hidden="true">' + n + '</span><h2 id="' + id + '" class="card-h">' + title + '</h2></div>';
@@ -282,6 +282,7 @@
       b.innerHTML = '<span' + (u === 'mm' ? ' class="on"' : '') + '>mm</span><span' + (u === 'in' ? ' class="on"' : '') + '>in</span>';
       b.setAttribute('aria-label', 'Units for this box: ' + (u === 'in' ? 'inches' : 'millimetres') + '. Switch to ' + (u === 'in' ? 'millimetres' : 'inches'));
     });
+    each('[data-unit-of]', function (el) { el.textContent = uOf(el.dataset.unitOf); });
     // inch boxes need a keyboard with space and "/" for tape fractions
     each('input[data-u]', function (el) { el.inputMode = uOf(el.dataset.u) === 'in' ? 'text' : 'decimal'; });
   }
@@ -430,12 +431,10 @@
         save();
         renderUnits();
         btn.parentNode.querySelector('input').dispatchEvent(new Event('input', { bubbles: true }));
-        // Reading boxes that follow this end's fully extended unit re-read what's typed, too.
+        // This end's reading boxes use the same unit: re-read what's typed in them, too.
         if (key.indexOf('extended.') === 0) {
           var e2 = key.split('.')[1];
-          ['reading', 'free'].forEach(function (f) {
-            if (!state.fieldUnits[f + '.' + e2]) $(e2 + '-' + f).dispatchEvent(new Event('input', { bubbles: true }));
-          });
+          ['reading', 'free'].forEach(function (f) { $(e2 + '-' + f).dispatchEvent(new Event('input', { bubbles: true })); });
         }
         break;
       case 'which':
