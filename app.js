@@ -6,7 +6,7 @@
   var OLD_KEY = 'sagcalc.v1';
   var MM_PER_IN = 25.4;
   var EPS = 1e-6;
-  var TOL_MM = 3; // "close enough" band either side of the target
+  var TOL_MM = 3; // "close enough" band either side of the rider sag target
   var ENDS = ['rear', 'front'];
   var NAMES = { rear: 'Rear', front: 'Front' };
 
@@ -18,7 +18,7 @@
     ['street', 'Street']
   ];
 
-  // r = rider sag % range, f = free sag % range
+  // r = rider sag % range, f = static sag % range
   var RANGES = {
     rear: {
       mx:        { r: [30, 35], f: [10, 13] },
@@ -36,8 +36,6 @@
     }
   };
 
-  var FIT_TEXT = 'Longer than fully extended. Check the mm / in switch';
-
   // ---------- helpers ----------
   function ok(v) { return typeof v === 'number' && isFinite(v); }
   function numOrNull(v) { return ok(v) ? v : null; }
@@ -46,16 +44,13 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  // Keep a number like "21 1/8" on one line.
-  function num(str) { return '<span class="n">' + esc(str) + '</span>'; }
-  function numText(str) { return esc(str).replace(/(\d+ \d+\/\d+)/g, '<span class="n">$1</span>'); }
   var $ = function (id) { return document.getElementById(id); };
   function each(sel, fn) { Array.prototype.forEach.call(document.querySelectorAll(sel), fn); }
 
   // ---------- state ----------
   function newEnd() { return { travel: null, extended: null, reading: null, free: null }; }
   function freshState() {
-    return { units: 'mm', fieldUnits: {}, which: 'both', preset: 'dualsport', custom: null, rear: newEnd(), front: newEnd() };
+    return { units: 'mm', fieldUnits: {}, preset: 'dualsport', custom: null, rear: newEnd(), front: newEnd() };
   }
 
   function normalize(s) {
@@ -66,7 +61,6 @@
         if (s.fieldUnits[k] === 'mm' || s.fieldUnits[k] === 'in') o.fieldUnits[k] = s.fieldUnits[k];
       });
     }
-    if (['both', 'rear', 'front'].indexOf(s.which) >= 0) o.which = s.which;
     if (s.preset === 'custom' || RANGES.rear[s.preset]) o.preset = s.preset;
     if (s.custom && typeof s.custom === 'object') {
       o.custom = {};
@@ -115,16 +109,13 @@
   }
 
   var state = load();
-  function shown(end) { return state.which === 'both' || state.which === end; }
 
   // ---------- units ----------
-  // state.units: results, and the default for any box the user hasn't switched.
-  // state.fieldUnits['extended.rear'] etc: that one box's own unit.
-  function tUnit() { return state.units; }
-  // Readings and targets follow that end's fully extended box: you measure and aim in one unit.
+  // state.units: default for any box the user hasn't switched.
+  // Readings and targets for an end always use that end's fully extended unit.
   function uOf(key) {
     var parts = key.split('.');
-    if (parts[0] === 'reading' || parts[0] === 'free') return uOf('extended.' + parts[1]); // no switch of their own
+    if (parts[0] === 'reading' || parts[0] === 'free') return uOf('extended.' + parts[1]);
     return state.fieldUnits[key] || state.units;
   }
 
@@ -138,12 +129,16 @@
   }
   function fmtNum(mm, u) {
     if (!ok(mm)) return '';
-    u = u || tUnit();
     if (u === 'in') return fmtIn(mm / MM_PER_IN);
     var n = parseFloat(mm.toFixed(1));
     return (n === 0 ? 0 : n).toString();
   }
-  function fmtLen(mm, u) { return fmtNum(mm, u) + ' ' + (u || tUnit()); }
+  // 3" or 76 mm
+  function fmtLen(mm, u) { return fmtNum(mm, u) + (u === 'in' ? '"' : ' mm'); }
+  // big target number with a small unit
+  function bigLen(mm, u) {
+    return '<span class="n">' + esc(fmtNum(mm, u)) + (u === 'in' ? '"' : '') + '</span>' + (u === 'in' ? '' : '<small> mm</small>');
+  }
 
   // Accepts 21, 21.5, 21,5, 21 5/16, 21-5/16, 5/16, with or without "in" / " / mm.
   function parseNum(str) {
@@ -166,8 +161,8 @@
   function unreadable(el) { return el.value.trim() !== '' && boxVal(el) == null; }
 
   // ---------- math ----------
-  // Sag = fully extended − reading with you on it  (Race Tech: L1 − L2)
-  // so the reading to aim for = fully extended − (travel × sag %).
+  // Sag = fully extended − loaded reading (Race Tech L1 − L2), so
+  // rider sag target = fully extended − (travel × rider sag %).
   function pcts(end) {
     if (state.preset === 'custom') {
       var c = state.custom[end];
@@ -184,64 +179,69 @@
     if (ok(T) && ok(E) && ok(p.lo) && ok(p.hi)) {
       o.lo = Math.min(p.lo, p.hi);
       o.hi = Math.max(p.lo, p.hi);
-      o.t1 = E - T * o.lo / 100; // least free sag (highest reading)
-      o.t2 = E - T * o.hi / 100; // most free sag (lowest reading)
+      o.t1 = E - T * o.lo / 100; // least static sag (highest reading)
+      o.t2 = E - T * o.hi / 100; // most static sag (lowest reading)
     }
     return o;
   }
 
   function riderVerdict(r, target, u) {
     var off = r - target;
-    if (off < -TOL_MM - EPS) return { cls: 'adjust', icon: '▲', head: 'Add preload', how: 'tighten', detail: fmtLen(-off, u) + ' too low' };
-    if (off > TOL_MM + EPS) return { cls: 'adjust', icon: '▼', head: 'Reduce preload', how: 'loosen', detail: fmtLen(off, u) + ' too high' };
-    return { cls: 'good', icon: '✓', head: 'Call it good', how: '', detail: 'within ' + fmtLen(TOL_MM, u) };
+    if (off < -TOL_MM - EPS) return { cls: 'adjust', icon: '▲', head: 'Add preload', amt: fmtLen(-off, u) + ' low' };
+    if (off > TOL_MM + EPS) return { cls: 'adjust', icon: '▼', head: 'Reduce preload', amt: fmtLen(off, u) + ' high' };
+    return { cls: 'good', icon: '✓', head: 'Call it good', amt: '' };
   }
 
-  function freeVerdict(r, c) {
-    if (r > c.t1 + EPS) return { cls: 'adjust', icon: '!', head: 'Stiffer spring', how: '',
-      detail: 'Too little free sag: spring too light for your weight. Until then, keep rider sag right and ride it.' };
-    if (r < c.t2 - EPS) return { cls: 'adjust', icon: '!', head: 'Softer spring', how: '',
-      detail: 'Too much free sag: spring too heavy for your weight. Until then, set preload for rider sag and ride it.' };
-    return { cls: 'good', icon: '✓', head: "Spring's right for you", how: '', detail: '' };
+  function staticVerdict(r, c) {
+    if (r > c.t1 + EPS) return { cls: 'adjust', icon: '!', head: 'Stiffer spring', amt: '' };
+    if (r < c.t2 - EPS) return { cls: 'adjust', icon: '!', head: 'Softer spring', amt: '' };
+    return { cls: 'good', icon: '✓', head: 'Spring OK', amt: '' };
   }
 
   // ---------- markup ----------
   function unitBtn(key) { return '<button type="button" class="u" data-act="box-unit" data-u="' + key + '"></button>'; }
+
+  // (i) button with a small popover; opens on tap, hover or keyboard focus.
+  function infoHTML(id, label, body) {
+    return '<span class="info"><button type="button" class="info-btn" data-act="info" aria-label="' + esc(label) + '" aria-controls="' + id + '" aria-expanded="false">i</button>' +
+      '<span class="info-body" id="' + id + '" role="note">' + body + '</span></span>';
+  }
+
   function box(id, label, end, f) {
     var key = f + '.' + end;
     return '<div class="field">' +
-      '<label class="lbl sm" for="' + id + '">' + label + '</label>' +
-      '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-u="' + key + '">' +
-        (f === 'reading' || f === 'free' ? '<span class="suf" data-unit-of="' + key + '"></span>' : unitBtn(key)) + '</div></div>';
+      '<label class="lbl" for="' + id + '">' + label + '</label>' +
+      '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-u="' + key + '">' + unitBtn(key) + '</div></div>';
   }
-  function head(n, id, title) {
-    return '<div class="stage-head"><span class="step" aria-hidden="true">' + n + '</span><h2 id="' + id + '" class="card-h">' + title + '</h2></div>';
+  function head(n, id, title, extra) {
+    return '<div class="stage-head"><span class="step" aria-hidden="true">' + n + '</span><h2 id="' + id + '" class="card-h">' + title + '</h2>' + (extra || '') + '</div>';
   }
 
   function presetRowsHTML() {
     function cell(end, t) {
       var g = RANGES[end][t];
-      return '<span class="pc"><b>' + g.r[0] + '–' + g.r[1] + '%</b><small>free ' + g.f[0] + '–' + g.f[1] + '%</small></span>';
+      return '<span class="pc"><b>' + g.r[0] + '–' + g.r[1] + '%</b><small>' + g.f[0] + '–' + g.f[1] + '%</small></span>';
     }
     function aria(t, name) {
       var r = RANGES.rear[t], f = RANGES.front[t];
-      return name + '. Rear: rider sag ' + r.r[0] + ' to ' + r.r[1] + '%, free sag ' + r.f[0] + ' to ' + r.f[1] +
-        '%. Front: rider sag ' + f.r[0] + ' to ' + f.r[1] + '%, free sag ' + f.f[0] + ' to ' + f.f[1] + '%.';
+      return name + '. Rear: rider sag ' + r.r[0] + ' to ' + r.r[1] + '%, static sag ' + r.f[0] + ' to ' + r.f[1] +
+        '%. Front: rider sag ' + f.r[0] + ' to ' + f.r[1] + '%, static sag ' + f.f[0] + ' to ' + f.f[1] + '%.';
     }
-    return TYPES.map(function (t) {
-      return '<label class="prow"><span class="pn"><input type="radio" name="preset" value="' + t[0] + '" aria-label="' + aria(t[0], t[1]) + '">' + t[1] + '</span>' +
-        cell('rear', t[0]) + cell('front', t[0]) + '</label>';
-    }).join('') +
-      '<label class="prow"><span class="pn"><input type="radio" name="preset" value="custom">Custom</span><span class="pc wide"><small>Your own numbers</small></span></label>';
+    return '<label class="prow"><span class="pn"><input type="radio" name="preset" value="custom">Custom</span><span class="pc wide"><small>Your own numbers</small></span></label>' +
+      TYPES.map(function (t) {
+        return '<label class="prow"><span class="pn"><input type="radio" name="preset" value="' + t[0] + '" aria-label="' + aria(t[0], t[1]) + '">' + t[1] + '</span>' +
+          cell('rear', t[0]) + cell('front', t[0]) + '</label>';
+      }).join('');
   }
 
-  // One check: label + target on a line, reading box, one status line.
+  // One check block: name + (i), target, reading box, status box.
   function checkHTML(end, f, label) {
     var id = end + '-' + f, key = f + '.' + end;
     return '<div class="check" id="' + id + '-check">' +
-      '<div class="check-head"><span class="check-k">' + label + '</span><span class="check-v" id="' + id + '-aim"></span></div>' +
-      '<p class="check-s" id="' + id + '-aim-s"></p>' +
-      '<label class="sr-only" for="' + id + '">' + NAMES[end] + ' reading, ' + label.toLowerCase() + '</label>' +
+      '<div class="check-head"><span class="check-k">' + label + '</span>' +
+        infoHTML(id + '-info', 'About ' + NAMES[end].toLowerCase() + ' ' + label.toLowerCase(), '') + '</div>' +
+      '<div class="check-v" id="' + id + '-aim"></div>' +
+      '<label class="sr-only" for="' + id + '">' + NAMES[end] + ' ' + label.toLowerCase() + ' reading</label>' +
       '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" placeholder="Your reading" data-end="' + end + '" data-f="' + f + '" data-u="' + key + '">' +
         '<span class="suf" data-unit-of="' + key + '"></span></div>' +
       '<p class="status" id="' + id + '-status"></p>' +
@@ -251,19 +251,16 @@
   function flowHTML() {
     return '' +
       '<section class="card" aria-labelledby="s2-h">' +
-        head(2, 's2-h', 'Fully extended') +
-        '<p class="hint">Wheel off the ground. Axle to a fixed mark above it. Use the same two points from here on.</p>' +
-        '<div class="pair">' +
-          '<div data-show="rear">' + box('rear-ext', 'Rear', 'rear', 'extended') + '</div>' +
-          '<div data-show="front">' + box('front-ext', 'Front', 'front', 'extended') + '</div>' +
-        '</div>' +
+        head(2, 's2-h', 'Fully extended', infoHTML('ext-info', 'How to measure fully extended',
+          'Lift the bike so the wheel is off the ground. Measure from the axle to a fixed mark straight above it. Use the same two points for every reading after this.')) +
+        '<div class="pair">' + box('rear-ext', 'Rear', 'rear', 'extended') + box('front-ext', 'Front', 'front', 'extended') + '</div>' +
       '</section>' +
 
       '<section class="card" aria-labelledby="s3-h">' +
         head(3, 's3-h', 'Aim for') +
         ENDS.map(function (end) {
-          return '<fieldset class="endset" data-show="' + end + '"><legend class="end-lbl">' + NAMES[end] + '</legend>' +
-            '<div class="checks">' + checkHTML(end, 'reading', 'With you on it') + checkHTML(end, 'free', 'Bike alone') + '</div>' +
+          return '<fieldset class="endset"><legend class="end-lbl">' + NAMES[end] + '</legend>' +
+            '<div class="checks">' + checkHTML(end, 'reading', 'Rider Sag') + checkHTML(end, 'free', 'Static Sag') + '</div>' +
           '</fieldset>';
         }).join('') +
       '</section>';
@@ -291,78 +288,87 @@
     each('input[data-u]', function (el) { el.inputMode = uOf(el.dataset.u) === 'in' ? 'text' : 'decimal'; });
   }
 
-  function renderWhich() {
-    each('[data-act="which"]', function (b) { b.setAttribute('aria-pressed', String(b.dataset.which === state.which)); });
-    each('[data-show]', function (el) { el.hidden = !shown(el.dataset.show); });
-  }
-
   function renderPreset() {
     each('input[name="preset"]', function (r) { r.checked = r.value === state.preset; });
     $('custom').hidden = state.preset !== 'custom';
   }
 
-  function missing(end, s, c) {
-    if (!ok(s.travel)) return 'Enter ' + end + ' travel in step 1';
-    if (!ok(c.p.rider)) return 'Enter a rider sag % in step 1';
-    if (!ok(s.extended)) return 'Enter fully extended in step 2';
-    return '';
-  }
-
   function setCheck(id, o) {
-    $(id + '-check').className = 'check' + (o.cls ? ' v-' + o.cls : '');
-    $(id + '-aim').innerHTML = o.aim || '';
-    $(id + '-aim-s').innerHTML = o.sub || '';
+    var on = !o.off;
+    $(id + '-check').className = 'check' + (o.off ? ' off' : '') + (o.cls ? ' v-' + o.cls : '');
+    $(id).disabled = !on;
+    $(id + '-aim').innerHTML = o.aim || '—';
+    $(id + '-info').innerHTML = o.info;
     var st = $(id + '-status');
     st.innerHTML = o.status || '';
     st.hidden = !o.status;
   }
 
   function statusHTML(v) {
-    return '<span class="st-head"><span class="st-icon" aria-hidden="true">' + v.icon + '</span>' + esc(v.head) + '</span>' +
-      (v.how ? '<span class="st-how">' + v.how + '</span>' : '') +
-      (v.detail ? '<span class="st-detail' + (v.detail.length > 30 ? ' long' : '') + '">' + numText(v.detail) + '</span>' : '');
+    return '<span class="st-icon" aria-hidden="true">' + v.icon + '</span><span class="st-head">' + esc(v.head) + '</span>' +
+      (v.amt ? '<span class="st-amt">' + esc(v.amt) + '</span>' : '');
   }
-  function warnHTML(text) { return '<span class="st-head"><span class="st-icon" aria-hidden="true">!</span>' + esc(text) + '</span>'; }
+  function warnHTML(text) { return statusHTML({ icon: '!', head: text, amt: '' }); }
+  var CANT_READ = 'Can’t read that';
+  var CHECK_UNITS = 'Check mm / in';
+
+  var RIDER_INFO = 'Sit on the bike in your gear, feet on the pegs. Measure the same two points. ' +
+    '<b>Add preload</b> = tighten the adjuster (bike sits higher). <b>Reduce preload</b> = loosen it. Within ±3 mm is good.';
+  var STATIC_INFO = 'Once rider sag is set: bike on its own weight, no rider. Measure the same two points. ' +
+    'Reading above the range = too little static sag: spring too light for your weight, fit a <b>stiffer spring</b>. ' +
+    'Below the range = too much static sag: spring too heavy, fit a <b>softer spring</b>. Until then, set preload for rider sag and ride it.';
 
   function update(end) {
-    var s = state[end], c = calc(end), need = missing(end, s, c), u = uOf('extended.' + end);
+    var s = state[end], c = calc(end), u = uOf('extended.' + end);
     var rid = end + '-reading', fid = end + '-free';
+    var ready = ok(c.target);
 
-    if (need) {
-      setCheck(rid, { sub: esc(need) });
-      setCheck(fid, {});
-      return;
+    // rider sag
+    var r = { off: !ready, info: RIDER_INFO };
+    if (ready) {
+      r.aim = bigLen(c.target, u);
+      r.info = RIDER_INFO + '<br><br>Target = ' + esc(fmtLen(s.extended, u)) + ' − ' + esc(fmtLen(c.rs, u)) +
+        ' sag (' + c.p.rider + '% of ' + esc(fmtLen(s.travel, uOf('travel.' + end))) + ').';
+      if (unreadable($(rid))) { r.cls = 'warn'; r.status = warnHTML(CANT_READ); }
+      else if (c.target <= 0) { r.cls = 'warn'; r.status = warnHTML(CHECK_UNITS); }
+      else if (ok(s.reading) && s.reading > s.extended + 2) { r.cls = 'warn'; r.status = warnHTML(CHECK_UNITS); }
+      else if (ok(s.reading)) { var rv = riderVerdict(s.reading, c.target, u); r.cls = rv.cls; r.status = statusHTML(rv); }
     }
-
-    // with rider
-    var r = { aim: num(fmtNum(c.target, u)) + ' <small>' + u + '</small>',
-              sub: num(fmtNum(s.extended, u)) + ' − ' + num(fmtNum(c.rs, u)) + ' sag (' + c.p.rider + '%)' };
-    if (unreadable($(rid))) { r.cls = 'warn'; r.status = warnHTML('Can’t read that. Try 21.5 or 21 1/2'); }
-    else if (c.target <= 0) { r.cls = 'warn'; r.status = warnHTML('Fully extended is less than the sag. Check the mm / in switch'); }
-    else if (ok(s.reading) && s.reading > s.extended + 2) { r.cls = 'warn'; r.status = warnHTML(FIT_TEXT); }
-    else if (ok(s.reading)) { var rv = riderVerdict(s.reading, c.target, u); r.cls = rv.cls; r.status = statusHTML(rv); }
     setCheck(rid, r);
 
-    // bike alone
-    if (!ok(c.t1)) { setCheck(fid, { sub: 'Enter free sag % in step 1' }); return; }
-    var half = fmtNum((c.t1 - c.t2) / 2, u);
-    var f = { aim: num(fmtNum((c.t1 + c.t2) / 2, u)) + (half !== '0' ? ' <small>± ' + num(half) + '</small>' : '') + ' <small>' + u + '</small>',
-              sub: c.lo + '–' + c.hi + '% free sag' };
-    if (unreadable($(fid))) { f.cls = 'warn'; f.status = warnHTML('Can’t read that. Try 21.5 or 21 1/2'); }
-    else if (ok(s.free) && s.free > s.extended + 2) { f.cls = 'warn'; f.status = warnHTML(FIT_TEXT); }
-    else if (ok(s.free)) { var fv = freeVerdict(s.free, c); f.cls = fv.cls; f.status = statusHTML(fv); }
+    // static sag
+    var ready2 = ready && ok(c.t1);
+    var f = { off: !ready2, info: STATIC_INFO };
+    if (ready2) {
+      var half = fmtNum((c.t1 - c.t2) / 2, u);
+      var mid = (c.t1 + c.t2) / 2;
+      f.aim = half === '0' ? bigLen(mid, u)   // 575 ± 5 mm  /  77" ± 1/8"
+        : (u === 'in' ? bigLen(mid, u) : '<span class="n">' + esc(fmtNum(mid, u)) + '</span>') +
+          ' <small class="pm">± ' + esc(fmtLen((c.t1 - c.t2) / 2, u)) + '</small>';
+      f.info = STATIC_INFO + '<br><br>Range ' + esc(fmtNum(c.t2, u)) + ' to ' + esc(fmtLen(c.t1, u)) + ' (' + c.lo + '–' + c.hi + '% static sag).';
+      if (unreadable($(fid))) { f.cls = 'warn'; f.status = warnHTML(CANT_READ); }
+      else if (ok(s.free) && s.free > s.extended + 2) { f.cls = 'warn'; f.status = warnHTML(CHECK_UNITS); }
+      else if (ok(s.free)) { var sv = staticVerdict(s.free, c); f.cls = sv.cls; f.status = statusHTML(sv); }
+    }
     setCheck(fid, f);
   }
 
   function renderAll() {
     renderUnits();
-    renderWhich();
     renderPreset();
     fillInputs();
     ENDS.forEach(update);
   }
 
   function showStorageWarn() { if (!storageOk) $('storage-warn').hidden = false; }
+
+  function closeInfos(except) {
+    each('.info.open', function (el) {
+      if (el === except) return;
+      el.classList.remove('open');
+      el.querySelector('.info-btn').setAttribute('aria-expanded', 'false');
+    });
+  }
 
   // ---------- events ----------
   document.addEventListener('input', function (e) {
@@ -398,8 +404,15 @@
 
   document.addEventListener('click', function (e) {
     var btn = e.target.closest('[data-act]');
+    if (!btn || btn.dataset.act !== 'info') closeInfos();
     if (!btn) return;
     switch (btn.dataset.act) {
+      case 'info':
+        var wrap = btn.parentNode, open = !wrap.classList.contains('open');
+        closeInfos(wrap);
+        wrap.classList.toggle('open', open);
+        btn.setAttribute('aria-expanded', String(open));
+        break;
       case 'unit':
         if (state.units === btn.dataset.unit) return;
         state.units = btn.dataset.unit;
@@ -421,13 +434,9 @@
           ['reading', 'free'].forEach(function (f) { $(e2 + '-' + f).dispatchEvent(new Event('input', { bubbles: true })); });
         }
         break;
-      case 'which':
-        state.which = btn.dataset.which;
-        save();
-        renderWhich();
-        break;
     }
   });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeInfos(); });
 
   // ---------- boot ----------
   $('preset-rows').innerHTML = presetRowsHTML();

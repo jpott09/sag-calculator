@@ -4,18 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Sag Calculator</title>
-  <meta name="description" content="Free motorcycle suspension sag calculator. Works out your rider sag and free sag targets and tells you which way to adjust preload.">
+  <meta name="description" content="Free motorcycle suspension sag calculator. Enter travel and your fully extended measurement, get your rider sag and static sag targets and which way to adjust preload.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5bd8'/%3E%3Cpath d='M9 7h14M9 25h14M11 7l10 3-10 3 10 3-10 3 10 3' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=17">
+  <link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
   <main class="wrap">
     <header class="top">
       <h1>Sag Calculator</h1>
-      <div class="units" role="group" aria-label="Units for results">
+      <div class="units" role="group" aria-label="Default units">
         <button type="button" data-act="unit" data-unit="mm" aria-pressed="true">mm</button>
         <button type="button" data-act="unit" data-unit="in" aria-pressed="false">in</button>
       </div>
@@ -23,56 +23,52 @@
 
     <p id="storage-warn" class="banner" hidden>Your browser is blocking storage, so these numbers won't be kept after you close the page.</p>
 
-    <section class="card setup" aria-labelledby="setup-h">
-      <div class="stage-head"><span class="step" aria-hidden="true">1</span><h2 id="setup-h" class="card-h">Your bike</h2></div>
-
-      <div class="seg" role="group" aria-label="Which end to set">
-        <button type="button" data-act="which" data-which="both" aria-pressed="true">Both</button>
-        <button type="button" data-act="which" data-which="rear" aria-pressed="false">Rear only</button>
-        <button type="button" data-act="which" data-which="front" aria-pressed="false">Front only</button>
-      </div>
-      <p class="hint seg-hint">No front preload adjuster? Pick Rear only.</p>
+    <section class="card" aria-labelledby="s1-h">
+      <div class="stage-head"><span class="step" aria-hidden="true">1</span><h2 id="s1-h" class="card-h">Your bike</h2></div>
 
       <div class="pair">
-        <div class="field" data-show="rear">
-          <label class="lbl" for="travel-rear">Rear travel</label>
+        <div class="field">
+          <label class="lbl" for="travel-rear">Rear suspension travel</label>
           <div class="inp">
-            <input id="travel-rear" type="text" inputmode="decimal" autocomplete="off" data-end="rear" data-f="travel" data-u="travel.rear" aria-describedby="travel-hint">
+            <input id="travel-rear" type="text" inputmode="decimal" autocomplete="off" data-end="rear" data-f="travel" data-u="travel.rear">
             <button type="button" class="u" data-act="box-unit" data-u="travel.rear"></button>
           </div>
         </div>
-        <div class="field" data-show="front">
-          <label class="lbl" for="travel-front">Front travel</label>
+        <div class="field">
+          <label class="lbl" for="travel-front">Front suspension travel</label>
           <div class="inp">
-            <input id="travel-front" type="text" inputmode="decimal" autocomplete="off" data-end="front" data-f="travel" data-u="travel.front" aria-describedby="travel-hint">
+            <input id="travel-front" type="text" inputmode="decimal" autocomplete="off" data-end="front" data-f="travel" data-u="travel.front">
             <button type="button" class="u" data-act="box-unit" data-u="travel.front"></button>
           </div>
         </div>
       </div>
-      <p class="hint" id="travel-hint">Wheel travel, from your owner's manual.</p>
 
       <fieldset class="presets">
-        <legend class="lbl">Riding style</legend>
-        <div class="phead" aria-hidden="true"><span></span><span>Rear</span><span>Front</span></div>
+        <legend class="sr-only">Riding style</legend>
+        <div class="presets-h" aria-hidden="true"><span class="lbl">Riding style</span><span class="est">(est. default values)</span></div>
+        <div class="phead" aria-hidden="true"><span></span><span>Rear<small>rider / static</small></span><span>Front<small>rider / static</small></span></div>
         <div id="preset-rows"></div>
       </fieldset>
 
       <div id="custom" class="custom" hidden>
         <div class="crow chead" aria-hidden="true"><span></span><span>Rear</span><span>Front</span></div>
         <div class="crow"><span class="clbl">Rider sag</span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="rear.rider" aria-label="Rear rider sag %"><span class="suf">%</span></span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="front.rider" aria-label="Front rider sag %"><span class="suf">%</span></span></div>
-        <div class="crow"><span class="clbl">Free sag min</span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="rear.lo" aria-label="Rear free sag minimum %"><span class="suf">%</span></span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="front.lo" aria-label="Front free sag minimum %"><span class="suf">%</span></span></div>
-        <div class="crow"><span class="clbl">Free sag max</span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="rear.hi" aria-label="Rear free sag maximum %"><span class="suf">%</span></span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="front.hi" aria-label="Front free sag maximum %"><span class="suf">%</span></span></div>
+        <div class="crow"><span class="clbl">Static sag min</span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="rear.lo" aria-label="Rear static sag minimum %"><span class="suf">%</span></span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="front.lo" aria-label="Front static sag minimum %"><span class="suf">%</span></span></div>
+        <div class="crow"><span class="clbl">Static sag max</span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="rear.hi" aria-label="Rear static sag maximum %"><span class="suf">%</span></span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="front.hi" aria-label="Front static sag maximum %"><span class="suf">%</span></span></div>
       </div>
     </section>
 
     <div id="flow"></div>
-    <p id="status" class="sr-only" aria-live="polite"></p>
 
     <footer class="foot">
-      <p>Made by <a href="https://www.youtube.com/@BR-ADV" target="_blank" rel="noopener">BackroadADV</a></p>
-      <p>Starting ranges, not laws. Your owner's manual number wins.</p>
+      <p class="links">
+        <a href="https://www.youtube.com/@BR-ADV" target="_blank" rel="noopener">BR-ADV on YouTube</a> ·
+        <a href="https://www.youtube.com/@BR-ADV/about" target="_blank" rel="noopener">Contact BR-ADV</a> ·
+        <a href="https://github.com/jpott09/sag-calculator/issues" target="_blank" rel="noopener">Report an issue</a>
+      </p>
+      <p class="disclaimer">Use at your own risk. Values shown are estimates and general starting points, not specifications for your motorcycle. Always follow your owner's manual and your suspension manufacturer's recommendations.</p>
     </footer>
   </main>
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>
