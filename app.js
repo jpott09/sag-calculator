@@ -2,11 +2,13 @@
   'use strict';
 
   // ---------- constants ----------
-  var KEY = 'sagcalc.v1';
+  var KEY = 'sagcalc.v2';
+  var OLD_KEY = 'sagcalc.v1';
   var MM_PER_IN = 25.4;
   var EPS = 1e-6;
   var GAP_WARN_MM = 5;
-  var SECS = ['rear', 'front'];
+  var ENDS = ['rear', 'front'];
+  var NAMES = { rear: 'Rear', front: 'Front' };
 
   var TYPES = [
     ['mx', 'MX'],
@@ -34,53 +36,62 @@
     }
   };
 
-  // ---------- state ----------
+  var GAP_TEXT = 'Big gap between readings: something may be binding (linkage, fork seals).';
+
+  // ---------- helpers ----------
+  function ok(v) { return typeof v === 'number' && isFinite(v); }
+  function numOrNull(v) { return ok(v) ? v : null; }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
-
-  function newSection(sec) {
-    var rg = RANGES[sec].dualsport;
-    return {
-      travel: null, type: 'dualsport',
-      riderPct: (rg.r[0] + rg.r[1]) / 2,
-      freeLow: rg.f[0], freeHigh: rg.f[1],
-      extended: null, tol: 3, log: [],
-      freeA: null, freeB: null,
-      normal: '', loaded: ''
-    };
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
   }
+  var $ = function (id) { return document.getElementById(id); };
+  function each(sel, fn) { Array.prototype.forEach.call(document.querySelectorAll(sel), fn); }
 
-  function newBike(name) {
-    return { id: uid(), name: name || '', rear: newSection('rear'), front: newSection('front') };
+  // ---------- state ----------
+  function newEnd() {
+    return { travel: null, extended: null, log: [], freeA: null, freeB: null, normal: '', loaded: '' };
   }
-
   function freshState() {
-    var b = newBike('My bike');
-    return { units: 'mm', fieldUnits: {}, current: b.id, bikes: [b] };
+    return { units: 'mm', travelUnit: null, which: 'both', preset: 'dualsport', custom: null, tol: 3, rear: newEnd(), front: newEnd() };
   }
 
   function normalize(s) {
-    var out = { units: s.units === 'in' ? 'in' : 'mm', fieldUnits: {}, current: s.current, bikes: [] };
-    if (s.fieldUnits && typeof s.fieldUnits === 'object') {
-      Object.keys(s.fieldUnits).forEach(function (k) {
-        if (s.fieldUnits[k] === 'mm' || s.fieldUnits[k] === 'in') out.fieldUnits[k] = s.fieldUnits[k];
+    var o = freshState();
+    if (s.units === 'in') o.units = 'in';
+    if (s.travelUnit === 'mm' || s.travelUnit === 'in') o.travelUnit = s.travelUnit;
+    if (['both', 'rear', 'front'].indexOf(s.which) >= 0) o.which = s.which;
+    if (s.preset === 'custom' || RANGES.rear[s.preset]) o.preset = s.preset;
+    if (ok(s.tol)) o.tol = s.tol;
+    if (s.custom && typeof s.custom === 'object') {
+      o.custom = {};
+      ENDS.forEach(function (e) {
+        var c = s.custom[e] || {};
+        o.custom[e] = { rider: numOrNull(c.rider), lo: numOrNull(c.lo), hi: numOrNull(c.hi) };
       });
     }
-    s.bikes.forEach(function (b) {
-      if (!b || typeof b !== 'object') return;
-      var nb = { id: b.id || uid(), name: typeof b.name === 'string' ? b.name : '' };
-      SECS.forEach(function (sec) {
-        var ns = newSection(sec);
-        var src = b[sec] && typeof b[sec] === 'object' ? b[sec] : {};
-        Object.keys(ns).forEach(function (k) { if (k in src) ns[k] = src[k]; });
-        if (!RANGES[sec][ns.type]) ns.type = 'dualsport';
-        if (!Array.isArray(ns.log)) ns.log = [];
-        nb[sec] = ns;
-      });
-      out.bikes.push(nb);
+    if (o.preset === 'custom' && !o.custom) o.preset = 'dualsport';
+    ENDS.forEach(function (e) {
+      var src = s[e] && typeof s[e] === 'object' ? s[e] : {};
+      Object.keys(o[e]).forEach(function (k) { if (k in src) o[e][k] = src[k]; });
+      if (!Array.isArray(o[e].log)) o[e].log = [];
     });
-    if (!out.bikes.length) return freshState();
-    if (!out.bikes.some(function (b) { return b.id === out.current; })) out.current = out.bikes[0].id;
-    return out;
+    return o;
+  }
+
+  // The first version kept several bikes; carry the first one over.
+  function fromV1(s) {
+    var b = s && Array.isArray(s.bikes) && s.bikes[0];
+    if (!b) return null;
+    return {
+      units: s.units,
+      travelUnit: s.fieldUnits && s.fieldUnits.travel,
+      tol: b.rear && b.rear.tol,
+      preset: b.rear && b.rear.type,
+      rear: b.rear, front: b.front
+    };
   }
 
   var storageOk = true;
@@ -92,10 +103,9 @@
   function load() {
     try {
       var raw = localStorage.getItem(KEY);
-      if (raw) {
-        var s = JSON.parse(raw);
-        if (s && Array.isArray(s.bikes) && s.bikes.length) return normalize(s);
-      }
+      if (raw) return normalize(JSON.parse(raw) || {});
+      var old = localStorage.getItem(OLD_KEY);
+      if (old) { var v = fromV1(JSON.parse(old)); if (v) return normalize(v); }
     } catch (e) { /* fall through */ }
     return freshState();
   }
@@ -106,39 +116,26 @@
   }
 
   var state = load();
-  var ui = { confirmClear: { rear: false, front: false }, confirmBikeDel: false };
+  var confirmClear = { rear: false, front: false };
 
-  function bike() {
-    for (var i = 0; i < state.bikes.length; i++) if (state.bikes[i].id === state.current) return state.bikes[i];
-    return state.bikes[0];
-  }
-
-  // ---------- numbers & units ----------
-  function ok(v) { return typeof v === 'number' && isFinite(v); }
-  // state.units = tape + results unit (and default for every box).
-  // state.fieldUnits[key] = per-box override, e.g. travel in mm while the tape reads inches.
-  function unit() { return state.units; }
-  // 'tape' boxes (extended length, readings, tolerance) always share the results unit;
-  // only 'travel' (from the spec sheet) can differ.
-  function uOf(key) { return (key && key !== 'tape' && state.fieldUnits[key]) || state.units; }
-  function toDisp(mm, u) { return (u || state.units) === 'in' ? mm / MM_PER_IN : mm; }
-  function fromDisp(v, u) { return (u || state.units) === 'in' ? v * MM_PER_IN : v; }
+  // ---------- units ----------
+  // state.units: tape readings + results. state.travelUnit: optional override for travel only.
+  function tUnit() { return state.units; }
+  function trUnit() { return state.travelUnit || state.units; }
 
   function fmtNum(mm, u) {
     if (!ok(mm)) return '';
-    u = u || state.units;
-    var d = toDisp(mm, u);
-    var s = u === 'in' ? d.toFixed(2) : d.toFixed(1);
-    var n = parseFloat(s);
-    return (n === 0 ? 0 : n).toString(); // avoid "-0"
+    u = u || tUnit();
+    var d = u === 'in' ? mm / MM_PER_IN : mm;
+    var n = parseFloat(u === 'in' ? d.toFixed(2) : d.toFixed(1));
+    return (n === 0 ? 0 : n).toString();
   }
-  function fmtLen(mm) { return ok(mm) ? fmtNum(mm) + ' ' + unit() : '—'; }
+  function fmtLen(mm, u) { return fmtNum(mm, u) + ' ' + (u || tUnit()); }
   function fmtOff(d) {
     var s = fmtNum(Math.abs(d));
-    if (parseFloat(s) === 0) return '0 ' + unit();
-    return (d > 0 ? '+' : '−') + s + ' ' + unit();
+    if (parseFloat(s) === 0) return 'on target';
+    return (d > 0 ? '+' : '−') + s + ' ' + tUnit();
   }
-  function fmtPct(p) { return ok(p) ? String(p) : ''; }
 
   function parseNum(str) {
     var s = String(str == null ? '' : str).trim().replace(',', '.');
@@ -146,458 +143,414 @@
     var n = Number(s);
     return isFinite(n) ? n : null;
   }
-  function parseLen(str, u) { var v = parseNum(str); return v == null ? null : fromDisp(v, u); }
-
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
+  function parseLen(str, u) {
+    var v = parseNum(str);
+    return v == null ? null : (u === 'in' ? v * MM_PER_IN : v);
   }
 
   // ---------- math ----------
-  function calc(s) {
-    var T = s.travel, E = s.extended, p = s.riderPct, out = {};
-    if (ok(T) && ok(p)) out.rs = T * p / 100;
-    if (ok(out.rs) && ok(E)) out.target = E - out.rs;
-    if (ok(T) && ok(E) && ok(s.freeLow) && ok(s.freeHigh)) {
-      out.lo = Math.min(s.freeLow, s.freeHigh);
-      out.hi = Math.max(s.freeLow, s.freeHigh);
-      out.t1 = E - T * out.lo / 100; // less free sag (higher reading)
-      out.t2 = E - T * out.hi / 100; // more free sag (lower reading)
+  function pcts(end) {
+    if (state.preset === 'custom') {
+      var c = state.custom[end];
+      return { rider: c.rider, lo: c.lo, hi: c.hi };
     }
-    return out;
+    var r = RANGES[end][state.preset];
+    return { rider: (r.r[0] + r.r[1]) / 2, lo: r.f[0], hi: r.f[1] };
+  }
+
+  function calc(end) {
+    var s = state[end], p = pcts(end), T = s.travel, E = s.extended, o = { p: p };
+    if (ok(T) && ok(p.rider)) o.rs = T * p.rider / 100;
+    if (ok(o.rs) && ok(E)) o.target = E - o.rs;
+    if (ok(T) && ok(E) && ok(p.lo) && ok(p.hi)) {
+      o.lo = Math.min(p.lo, p.hi);
+      o.hi = Math.max(p.lo, p.hi);
+      o.t1 = E - T * o.lo / 100; // Target 1: least free sag (highest reading)
+      o.t2 = E - T * o.hi / 100; // Target 2: most free sag (lowest reading)
+    }
+    return o;
   }
 
   function avg(a, b) {
     if (ok(a) && ok(b)) return (a + b) / 2;
-    if (ok(a)) return a;
-    if (ok(b)) return b;
-    return null;
+    return ok(a) ? a : ok(b) ? b : null;
   }
   function bigGap(a, b) { return ok(a) && ok(b) && Math.abs(a - b) > GAP_WARN_MM + EPS; }
-  function tolOf(s) { return ok(s.tol) ? Math.abs(s.tol) : 0; }
+  function tol() { return ok(state.tol) ? Math.abs(state.tol) : 0; }
 
-  function riderVerdict(r, target, tol) {
-    if (!ok(target)) return { cls: 'none', text: 'Fill in travel, sag % and extended length to get a verdict.' };
+  function riderVerdict(r, target) {
+    if (!ok(target)) return null;
     var off = r - target;
-    if (off < -tol - EPS) return { cls: 'adjust', text: 'Sitting too low by ' + fmtLen(-off) + '. ADD preload.' };
-    if (off > tol + EPS) return { cls: 'adjust', text: 'Sitting too high by ' + fmtLen(off) + '. REDUCE preload.' };
-    return { cls: 'good', text: 'Close enough. Call it good.' };
+    if (off < -tol() - EPS) return { cls: 'adjust', icon: '▲', head: 'ADD preload', sub: 'Sitting too low by ' + fmtLen(-off) + '.' };
+    if (off > tol() + EPS) return { cls: 'adjust', icon: '▼', head: 'REDUCE preload', sub: 'Sitting too high by ' + fmtLen(off) + '.' };
+    return { cls: 'good', icon: '✓', head: 'Call it good', sub: 'Close enough.' };
   }
 
   function freeVerdict(r, c) {
-    if (!ok(c.t1)) return { cls: 'none', text: 'Fill in travel, extended length and the free sag range first.' };
-    if (r > c.t1 + EPS) return { cls: 'adjust', text: 'Too little free sag. Your spring is too light for your weight: stiffer spring. Until then, keep your rider sag right and ride it.' };
-    if (r < c.t2 - EPS) return { cls: 'adjust', text: 'Too much free sag. Your spring is too heavy for your weight: softer spring. Until then, set preload for rider sag and ride it.' };
-    return { cls: 'good', text: "Spring's right for you." };
+    if (!ok(c.t1)) return null;
+    if (r > c.t1 + EPS) return { cls: 'adjust', head: 'Stiffer spring', short: 'Stiffer spring',
+      sub: 'Too little free sag. Your spring is too light for your weight: stiffer spring. Until then, keep your rider sag right and ride it.' };
+    if (r < c.t2 - EPS) return { cls: 'adjust', head: 'Softer spring', short: 'Softer spring',
+      sub: 'Too much free sag. Your spring is too heavy for your weight: softer spring. Until then, set preload for rider sag and ride it.' };
+    return { cls: 'good', head: "Spring's right for you.", short: 'Spring OK', sub: '' };
   }
 
-  // ---------- markup ----------
-  var GAP_TEXT = 'Big gap between readings: something may be binding (linkage, fork seals).';
+  // ---------- static markup ----------
+  function presetRowsHTML() {
+    function cell(end, t) {
+      var g = RANGES[end][t];
+      return '<span class="pc"><b>' + g.r[0] + '–' + g.r[1] + '%</b><small>free ' + g.f[0] + '–' + g.f[1] + '%</small></span>';
+    }
+    function aria(t, name) {
+      var r = RANGES.rear[t], f = RANGES.front[t];
+      return name + '. Rear: rider sag ' + r.r[0] + ' to ' + r.r[1] + '%, free sag ' + r.f[0] + ' to ' + r.f[1] +
+        '%. Front: rider sag ' + f.r[0] + ' to ' + f.r[1] + '%, free sag ' + f.f[0] + ' to ' + f.f[1] + '%.';
+    }
+    return TYPES.map(function (t) {
+      return '<label class="prow"><span class="pn"><input type="radio" name="preset" value="' + t[0] + '" aria-label="' + aria(t[0], t[1]) + '">' + t[1] + '</span>' +
+        cell('rear', t[0]) + cell('front', t[0]) + '</label>';
+    }).join('') +
+      '<label class="prow"><span class="pn"><input type="radio" name="preset" value="custom">Custom</span><span class="pc wide"><small>Your own numbers</small></span></label>';
+  }
 
-  function unitBtn(fu) {
-    return '<button type="button" class="u" data-act="fu" data-fu="' + fu + '">mm</button>';
-  }
-  function lenField(sec, f, fu, label, hint) {
-    return '<label class="field"><span class="lbl">' + label + '</span>' +
-      '<span class="inp"><input type="text" inputmode="decimal" autocomplete="off" data-sec="' + sec + '" data-f="' + f + '" data-k="len" data-fu="' + fu + '">' + unitBtn(fu) + '</span>' +
-      (hint ? '<span class="hint">' + hint + '</span>' : '') + '</label>';
-  }
-  function pctInput(sec, f, aria) {
-    return '<span class="inp"><input type="text" inputmode="decimal" autocomplete="off" aria-label="' + aria + '" data-sec="' + sec + '" data-f="' + f + '" data-k="pct"><span class="pct">%</span></span>';
-  }
-  function textField(sec, f, label, ph) {
-    return '<label class="field"><span class="lbl">' + label + '</span>' +
-      '<input class="text" type="text" autocomplete="off" maxlength="80" placeholder="' + ph + '" data-sec="' + sec + '" data-f="' + f + '" data-k="text"></label>';
-  }
-
-  function sectionHTML(sec) {
-    var rear = sec === 'rear';
-    var notes = rear
-      ? ['Do this first. Front comes after.']
-      : ['Fully extended = front wheel off the ground.', 'Some bikes have no front preload adjuster.'];
-    var opts = TYPES.map(function (t) { return '<option value="' + t[0] + '">' + t[1] + '</option>'; }).join('');
-    var p = sec + '-';
-
+  function endHTML(end) {
+    var p = end + '-', front = end === 'front';
+    function tapeInput(id, f, label) {
+      return '<div class="field"><label class="lbl sm" for="' + id + '">' + label + '</label>' +
+        '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-k="tape"><span class="suf t-unit">mm</span></div></div>';
+    }
+    function textInput(f, label, ph) {
+      return '<div class="field"><label class="lbl sm" for="' + p + f + '">' + label + '</label>' +
+        '<input class="text" id="' + p + f + '" type="text" autocomplete="off" maxlength="80" placeholder="' + ph + '" data-end="' + end + '" data-f="' + f + '" data-k="text"></div>';
+    }
     return '' +
-      '<section class="card sec" id="sec-' + sec + '">' +
-        '<div class="sec-head"><span class="step">' + (rear ? 1 : 2) + '</span><h2>' + (rear ? 'Rear' : 'Front') + '</h2></div>' +
-        '<ul class="notes">' + notes.map(function (n) { return '<li>' + n + '</li>'; }).join('') + '</ul>' +
+      '<section class="card end" id="end-' + end + '" data-show="' + end + '" aria-labelledby="' + p + 'h">' +
+        '<div class="end-head"><span class="step" aria-hidden="true">' + (front ? 2 : 1) + '</span><h2 id="' + p + 'h" class="card-h">' + NAMES[end] + '</h2>' +
+          (front ? '<span class="aside">Some bikes have no front preload adjuster.</span>' : '') + '</div>' +
 
-        '<div class="part"><h3>Setup</h3>' +
-          '<p class="part-intro">Tap <b>mm</b>/<b>in</b> on a box to type that value in the other unit.</p>' +
-          lenField(sec, 'travel', 'travel', 'Wheel travel <i>T</i>', "Owner's manual or maker's spec sheet.") +
-          '<label class="field"><span class="lbl">Riding type</span><select data-sec="' + sec + '" data-f="type" data-k="sel">' + opts + '</select></label>' +
-          '<label class="field"><span class="lbl">Rider sag</span>' + pctInput(sec, 'riderPct', 'Rider sag percent') +
-            '<span class="hint" id="' + p + 'range"></span></label>' +
-          '<div class="field"><span class="lbl">Free sag range</span>' +
-            '<div class="pair">' + pctInput(sec, 'freeLow', 'Free sag low percent') + pctInput(sec, 'freeHigh', 'Free sag high percent') + '</div>' +
-            '<span class="hint">Low % and high %. Prefilled from the riding type.</span></div>' +
-          lenField(sec, 'extended', 'tape', 'Fully extended length <i>E</i>',
-            (rear ? '' : 'Front wheel off the ground. ') + 'Same two points every time, bike lifted so the suspension is fully extended.') +
+        '<div class="field">' +
+          '<label class="lbl" for="' + p + 'ext">Fully extended</label>' +
+          '<div class="inp"><input id="' + p + 'ext" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="extended" data-k="tape" aria-describedby="' + p + 'ext-h"><span class="suf t-unit">mm</span></div>' +
+          '<p class="hint" id="' + p + 'ext-h">' + (front ? 'Front wheel off the ground. ' : 'Bike lifted, wheel off the ground. ') + 'Same two points every time.</p>' +
         '</div>' +
 
-        '<div class="part"><h3>Targets</h3>' +
-          '<div class="tiles">' +
-            '<div class="tile main"><div class="tile-k">Rider sag target (tape reading with you on it)</div><div class="tile-v" id="' + p + 'target">—</div><div class="tile-s" id="' + p + 'target-s"></div></div>' +
-            '<div class="tile"><div class="tile-k">Settles by (RS)</div><div class="tile-v" id="' + p + 'rs">—</div><div class="tile-s" id="' + p + 'rs-s">How far it should settle with you on it.</div></div>' +
-            '<div class="tile"><div class="tile-k">Free sag window</div><div class="tile-v" id="' + p + 'free">—</div><div class="tile-s" id="' + p + 'free-s">Bike only, no rider.</div></div>' +
-          '</div>' +
-        '</div>' +
+        '<div class="target" id="' + p + 'target"></div>' +
 
-        '<div class="part"><h3>Rider sag log</h3>' +
-          '<div id="' + p + 'latest" aria-live="polite"></div>' +
-          '<form class="add" data-sec="' + sec + '" novalidate>' +
-            '<div class="field"><span class="lbl">Add measurement</span>' +
-              '<div class="pair">' +
-                '<label class="field"><span class="hint">Lifted &amp; settled</span><span class="inp"><input name="a" type="text" inputmode="decimal" autocomplete="off" data-fu="tape">' + unitBtn('tape') + '</span></label>' +
-                '<label class="field"><span class="hint">Pushed &amp; returned</span><span class="inp"><input name="b" type="text" inputmode="decimal" autocomplete="off" data-fu="tape">' + unitBtn('tape') + '</span></label>' +
-              '</div>' +
-              '<span class="hint">Fill one or both. Two readings get averaged.</span>' +
+        '<form class="add" data-end="' + end + '" novalidate>' +
+          '<fieldset><legend class="lbl">Reading with you on it</legend>' +
+            '<div class="pair">' +
+              '<div class="field"><label class="lbl sm" for="' + p + 'a">Lifted &amp; settled</label><div class="inp"><input id="' + p + 'a" name="a" type="text" inputmode="decimal" autocomplete="off"><span class="suf t-unit">mm</span></div></div>' +
+              '<div class="field"><label class="lbl sm" for="' + p + 'b">Pushed &amp; returned</label><div class="inp"><input id="' + p + 'b" name="b" type="text" inputmode="decimal" autocomplete="off"><span class="suf t-unit">mm</span></div></div>' +
+            '</div>' +
+            '<div class="note-row">' +
+              '<input class="text" name="note" type="text" autocomplete="off" maxlength="80" placeholder="Note, e.g. +1 turn" aria-label="Note (optional)">' +
+              '<button class="btn primary" type="submit">Add</button>' +
             '</div>' +
             '<p class="preview" id="' + p + 'preview"></p>' +
-            '<label class="field"><span class="lbl">Note <span class="opt">(optional)</span></span><input class="text" name="note" type="text" autocomplete="off" maxlength="80" placeholder="+1 turn, clicker 12…"></label>' +
             '<p class="form-err" id="' + p + 'err" hidden></p>' +
-            '<button class="btn primary" type="submit">Add measurement</button>' +
-          '</form>' +
-          '<label class="tol">Close enough within ±<span class="inp"><input type="text" inputmode="decimal" autocomplete="off" aria-label="Tolerance" data-sec="' + sec + '" data-f="tol" data-k="len" data-fu="tape">' + unitBtn('tape') + '</span></label>' +
-          '<div id="' + p + 'history"></div>' +
-        '</div>' +
+          '</fieldset>' +
+        '</form>' +
 
-        '<div class="part"><h3>Free sag check (bike only, no rider)</h3>' +
-          '<p class="part-intro">Do this once rider sag is set. Bike sitting on its own weight.</p>' +
-          '<div class="pair">' +
-            lenField(sec, 'freeA', 'tape', '<span class="hint">Lifted &amp; settled</span>') +
-            lenField(sec, 'freeB', 'tape', '<span class="hint">Pushed &amp; returned</span>') +
+        '<div id="' + p + 'verdict"></div>' +
+        '<div id="' + p + 'history"></div>' +
+
+        '<details class="more">' +
+          '<summary><span>Free sag check</span><span class="sum-val" id="' + p + 'free-sum"></span></summary>' +
+          '<div class="more-body">' +
+            '<p class="hint">Bike on its own weight, no rider.</p>' +
+            '<div class="pair">' + tapeInput(p + 'fa', 'freeA', 'Lifted &amp; settled') + tapeInput(p + 'fb', 'freeB', 'Pushed &amp; returned') + '</div>' +
+            '<div id="' + p + 'free"></div>' +
           '</div>' +
-          '<div id="' + p + 'free-verdict" aria-live="polite"></div>' +
-        '</div>' +
+        '</details>' +
 
-        '<div class="part"><h3>Saved settings</h3>' +
-          textField(sec, 'normal', 'Normal setting', 'e.g. 8 clicks out') +
-          textField(sec, 'loaded', 'Loaded setting', 'e.g. collar 3 turns') +
-          '<span class="hint">Loaded = luggage on, or a weight on the bike with you.</span>' +
-        '</div>' +
+        '<details class="more">' +
+          '<summary><span>Preload settings</span><span class="sum-val" id="' + p + 'set-sum"></span></summary>' +
+          '<div class="more-body">' +
+            textInput('normal', 'Normal', 'e.g. 8 clicks out') +
+            textInput('loaded', 'Loaded', 'e.g. collar 3 turns') +
+            '<p class="hint">Loaded = luggage on, or a weight on the bike with you.</p>' +
+          '</div>' +
+        '</details>' +
       '</section>';
   }
 
   // ---------- rendering ----------
-  var $ = function (id) { return document.getElementById(id); };
-
-  function renderBikeBar() {
-    var sel = $('bike-select');
-    sel.innerHTML = state.bikes.map(function (b) {
-      return '<option value="' + esc(b.id) + '"' + (b.id === state.current ? ' selected' : '') + '>' + esc(b.name || 'Unnamed bike') + '</option>';
-    }).join('');
-    $('bike-name').value = bike().name;
-    renderBikeDel();
-  }
-
-  function renderBikeDel() {
-    var b = bike();
-    $('bike-del').innerHTML = ui.confirmBikeDel
-      ? '<div class="confirm"><p>Delete “' + esc(b.name || 'Unnamed bike') + '” and all its readings?</p>' +
-        '<div class="btns"><button class="btn danger" type="button" data-act="bike-del-yes">Delete bike</button>' +
-        '<button class="btn" type="button" data-act="bike-del-no">Cancel</button></div></div>'
-      : '<button class="btn link" type="button" data-act="bike-del-ask">Delete this bike</button>';
-  }
-
-  function fillInputs(sec) {
-    var s = bike()[sec];
-    var els = document.querySelectorAll('[data-sec="' + sec + '"][data-f]');
-    Array.prototype.forEach.call(els, function (el) {
-      var f = el.dataset.f, k = el.dataset.k, v = s[f];
-      if (k === 'len') el.value = ok(v) ? fmtNum(v, uOf(el.dataset.fu)) : '';
-      else if (k === 'pct') el.value = fmtPct(v);
+  function fillInputs() {
+    each('[data-f]', function (el) {
+      var v = state[el.dataset.end][el.dataset.f], k = el.dataset.k;
+      if (k === 'travel') el.value = fmtNum(v, trUnit());
+      else if (k === 'tape') el.value = fmtNum(v, tUnit());
       else el.value = v == null ? '' : v;
+    });
+    each('[data-custom]', function (el) {
+      var parts = el.dataset.custom.split('.');
+      var v = state.custom && state.custom[parts[0]][parts[1]];
+      el.value = ok(v) ? String(v) : '';
+    });
+    $('tol').value = fmtNum(state.tol, tUnit());
+  }
+
+  function renderUnits() {
+    each('[data-act="unit"]', function (b) { b.setAttribute('aria-pressed', String(b.dataset.unit === state.units)); });
+    each('.t-unit', function (el) { el.textContent = tUnit(); });
+    each('[data-act="travel-unit"]', function (b) {
+      b.textContent = trUnit();
+      b.setAttribute('aria-label', 'Travel in ' + (trUnit() === 'in' ? 'inches' : 'millimetres') + '. Tap to switch.');
     });
   }
 
-  function update(sec) {
-    var s = bike()[sec], c = calc(s), p = sec + '-', tol = tolOf(s);
-    var rg = RANGES[sec][s.type];
-    var typeName = TYPES.filter(function (t) { return t[0] === s.type; })[0][1];
-    $(p + 'range').textContent = 'Range for ' + typeName + ': ' + rg.r[0] + '–' + rg.r[1] + '%. Prefilled with the middle.';
+  function renderWhich() {
+    each('[data-act="which"]', function (b) { b.setAttribute('aria-pressed', String(b.dataset.which === state.which)); });
+    each('[data-show]', function (el) { el.hidden = state.which !== 'both' && el.dataset.show !== state.which; });
+    each('.end .step', function (el) { el.hidden = state.which !== 'both'; });
+  }
 
-    // targets
-    $(p + 'target').textContent = fmtLen(c.target);
-    $(p + 'target-s').textContent = ok(c.target)
-      ? 'E − RS = ' + fmtNum(s.extended) + ' − ' + fmtNum(c.rs) + ' ' + unit()
-      : 'Enter travel, rider sag % and extended length.';
-    $(p + 'rs').textContent = fmtLen(c.rs);
-    $(p + 'rs-s').textContent = ok(c.rs)
-      ? fmtNum(s.travel) + ' × ' + s.riderPct + '%. How far it should settle with you on it.'
-      : 'How far it should settle with you on it.';
-    if (ok(c.t1)) {
-      $(p + 'free').innerHTML = esc(fmtNum(c.t2)) + '–' + esc(fmtNum(c.t1)) + ' <small>' + unit() + '</small>';
-      $(p + 'free-s').textContent = 'Target 1 (' + c.lo + '%): ' + fmtNum(c.t1) + '. Target 2 (' + c.hi + '%): ' + fmtNum(c.t2) + '. Bike only, no rider.';
+  function renderPreset() {
+    each('input[name="preset"]', function (r) { r.checked = r.value === state.preset; });
+    $('custom').hidden = state.preset !== 'custom';
+  }
+
+  function update(end) {
+    var s = state[end], c = calc(end), p = end + '-';
+
+    var t = $(p + 'target');
+    if (!ok(s.travel)) {
+      t.className = 'target empty';
+      t.textContent = 'Enter ' + end + ' travel in Setup.';
+    } else if (!ok(c.p.rider)) {
+      t.className = 'target empty';
+      t.textContent = 'Enter a rider sag % in Setup.';
+    } else if (!ok(s.extended)) {
+      t.className = 'target empty';
+      t.textContent = 'Enter the fully extended length.';
     } else {
-      $(p + 'free').textContent = '—';
-      $(p + 'free-s').textContent = 'Bike only, no rider.';
+      t.className = 'target';
+      t.innerHTML = '<span class="t-k">Target with you on it</span>' +
+        '<span class="t-v">' + esc(fmtNum(c.target)) + ' <small>' + tUnit() + '</small></span>' +
+        '<span class="t-s">' + esc(fmtLen(c.rs)) + ' of sag (' + c.p.rider + '% of ' + esc(fmtLen(s.travel, trUnit())) + ')</span>';
     }
 
-    renderLog(sec, s, c, tol);
-    renderFree(sec, s, c);
+    renderVerdict(end, s, c);
+    renderHistory(end, s, c);
+    renderFree(end, s, c);
+    $(p + 'set-sum').textContent = [s.normal, s.loaded].filter(Boolean).join(' / ');
   }
 
   function readingOf(e) { return avg(e.a, e.b); }
 
-  function fmtTime(ts) {
-    try {
-      return new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    } catch (e) { return ''; }
+  function renderVerdict(end, s, c) {
+    var box = $(end + '-verdict');
+    var e = s.log[s.log.length - 1];
+    if (!e) { box.innerHTML = ''; return; }
+    var r = readingOf(e), v = riderVerdict(r, c.target);
+    var del = '<button class="x" type="button" data-act="del" data-end="' + end + '" data-id="' + esc(e.id) + '" aria-label="Delete reading ' + esc(fmtLen(r)) + '">×</button>';
+    var note = e.note ? '<p class="v-note">' + esc(e.note) + '</p>' : '';
+    var html = v
+      ? '<div class="verdict v-' + v.cls + '">' + del +
+          '<p class="v-head"><span class="v-icon" aria-hidden="true">' + v.icon + '</span>' + v.head + '</p>' +
+          '<p class="v-sub">' + esc(v.sub) + ' <span class="v-nums">' + esc(fmtLen(r)) + ' vs ' + esc(fmtLen(c.target)) + '</span></p>' +
+          note + '</div>'
+      : '<div class="verdict">' + del + '<p class="v-head">' + esc(fmtLen(r)) + '</p><p class="v-sub">Finish setup to get a verdict.</p>' + note + '</div>';
+    if (bigGap(e.a, e.b)) html += '<p class="gap">' + GAP_TEXT + '</p>';
+    box.innerHTML = html;
   }
 
-  function renderLog(sec, s, c, tol) {
-    var p = sec + '-';
-    var rows = s.log.slice().reverse();
-    var latest = rows[0];
+  function fmtTime(ts) {
+    try { return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+    catch (e) { return ''; }
+  }
 
-    if (!latest) {
-      $(p + 'latest').innerHTML = '<div class="verdict"><p class="v-text">No readings yet.</p>' +
-        '<p class="v-sub">Sit on the bike in your riding gear, feet on the pegs, and have a helper measure between the same two points. Add it below.</p></div>';
-    } else {
-      var r = readingOf(latest), v = riderVerdict(r, c.target, tol);
-      $(p + 'latest').innerHTML = '<div class="verdict v-' + v.cls + '">' +
-        '<div class="v-top"><span class="v-label">Latest reading</span><span class="v-read">' + esc(fmtLen(r)) + '</span></div>' +
-        '<p class="v-text">' + esc(v.text) + '</p>' +
-        (ok(c.target) ? '<p class="v-sub">Target ' + esc(fmtLen(c.target)) + ' · offset ' + esc(fmtOff(r - c.target)) + '</p>' : '') +
-        (bigGap(latest.a, latest.b) ? '<p class="gap">' + GAP_TEXT + '</p>' : '') +
-        '</div>';
-    }
-
+  function renderHistory(end, s, c) {
+    var older = s.log.slice(0, -1).reverse();
     var html = '';
-    if (rows.length) {
-      html += '<p class="log-h">History (newest first)</p><ul class="log">';
-      rows.forEach(function (e) {
-        var r = readingOf(e), v = riderVerdict(r, c.target, tol);
-        var meta = [fmtTime(e.ts)];
-        if (ok(e.a) && ok(e.b)) meta.push(fmtNum(e.a) + ' / ' + fmtNum(e.b));
-        html += '<li class="row v-' + v.cls + '">' +
-          '<div class="row-main"><span class="row-read">' + esc(fmtLen(r)) + '</span>' +
-            (ok(c.target) ? '<span class="row-off">' + esc(fmtOff(r - c.target)) + '</span>' : '') + '</div>' +
-          (v.cls !== 'none' ? '<div class="row-verdict">' + esc(v.text) + '</div>' : '') +
-          (e.note ? '<div class="row-meta row-note">' + esc(e.note) + '</div>' : '') +
-          '<div class="row-meta">' + esc(meta.join(' · ')) + '</div>' +
-          (bigGap(e.a, e.b) ? '<div class="gap">' + GAP_TEXT + '</div>' : '') +
-          '<button class="x" type="button" data-act="row-del" data-sec="' + sec + '" data-id="' + esc(e.id) + '" aria-label="Delete this reading">×</button>' +
+    if (older.length) {
+      html += '<ul class="log" aria-label="Earlier ' + end + ' readings">';
+      older.forEach(function (e) {
+        var r = readingOf(e), v = riderVerdict(r, c.target);
+        html += '<li class="row' + (v ? ' v-' + v.cls : '') + '">' +
+          '<span class="row-read">' + esc(fmtLen(r)) + '</span>' +
+          '<span class="row-v">' + (v ? '<span aria-hidden="true">' + v.icon + '</span> ' + esc(fmtOff(r - c.target)) : '') + '</span>' +
+          '<span class="row-meta">' + esc([e.note, fmtTime(e.ts)].filter(Boolean).join(' · ')) +
+            (bigGap(e.a, e.b) ? ' <span class="gap-tag">⚠ gap</span>' : '') + '</span>' +
+          '<button class="x" type="button" data-act="del" data-end="' + end + '" data-id="' + esc(e.id) + '" aria-label="Delete reading ' + esc(fmtLen(r)) + ' from ' + esc(fmtTime(e.ts)) + '">×</button>' +
           '</li>';
       });
       html += '</ul>';
-      html += ui.confirmClear[sec]
-        ? '<div class="confirm"><p>Clear all ' + rows.length + ' reading' + (rows.length === 1 ? '' : 's') + ' for the ' + sec + '?</p>' +
-          '<div class="btns"><button class="btn danger" type="button" data-act="clear-yes" data-sec="' + sec + '">Yes, clear</button>' +
-          '<button class="btn" type="button" data-act="clear-no" data-sec="' + sec + '">Cancel</button></div></div>'
-        : '<button class="btn link" type="button" data-act="clear-ask" data-sec="' + sec + '">Clear log</button>';
     }
-    $(p + 'history').innerHTML = html;
+    if (s.log.length) {
+      html += confirmClear[end]
+        ? '<div class="confirm"><span>Clear all ' + s.log.length + ' reading' + (s.log.length === 1 ? '' : 's') + '?</span>' +
+          '<button class="btn danger" type="button" data-act="clear-yes" data-end="' + end + '">Clear</button>' +
+          '<button class="btn" type="button" data-act="clear-no" data-end="' + end + '">Cancel</button></div>'
+        : '<button class="btn link" type="button" data-act="clear-ask" data-end="' + end + '">Clear log</button>';
+    }
+    $(end + '-history').innerHTML = html;
   }
 
-  function renderFree(sec, s, c) {
-    var box = $(sec + '-free-verdict');
-    var r = avg(s.freeA, s.freeB);
-    if (!ok(r)) {
-      box.innerHTML = ok(c.t1)
-        ? '<div class="verdict small"><p class="v-sub">Enter a reading. You want it between ' + esc(fmtNum(c.t2)) + ' and ' + esc(fmtLen(c.t1)) + '.</p></div>'
-        : '';
+  function renderFree(end, s, c) {
+    var box = $(end + '-free'), sum = $(end + '-free-sum');
+    var r = avg(s.freeA, s.freeB), v = ok(r) ? freeVerdict(r, c) : null;
+    var win = ok(c.t1) ? fmtNum(c.t2) + '–' + fmtLen(c.t1) : '';
+    sum.className = 'sum-val' + (v ? ' v-' + v.cls : '');
+    sum.textContent = v ? v.short : win;
+    if (!v) {
+      box.innerHTML = win ? '<p class="hint">Aim for ' + esc(win) + ' (' + c.lo + '–' + c.hi + '% of travel).</p>' : '';
       return;
     }
-    var v = freeVerdict(r, c);
     box.innerHTML = '<div class="verdict small v-' + v.cls + '">' +
-      '<div class="v-top"><span class="v-label">Free sag reading</span><span class="v-read">' + esc(fmtLen(r)) + '</span></div>' +
-      '<p class="v-text">' + esc(v.text) + '</p>' +
-      (ok(c.t1) ? '<p class="v-sub">Window ' + esc(fmtNum(c.t2)) + '–' + esc(fmtLen(c.t1)) + '</p>' : '') +
-      (bigGap(s.freeA, s.freeB) ? '<p class="gap">' + GAP_TEXT + '</p>' : '') +
-      '</div>';
+      '<p class="v-head">' + esc(v.head) + '</p>' +
+      (v.sub ? '<p class="v-sub">' + esc(v.sub) + '</p>' : '') +
+      '<p class="v-sub"><span class="v-nums">' + esc(fmtLen(r)) + ' · window ' + esc(win) + '</span></p>' +
+      '</div>' +
+      (bigGap(s.freeA, s.freeB) ? '<p class="gap">' + GAP_TEXT + '</p>' : '');
   }
 
   function updatePreview(form) {
-    var sec = form.dataset.sec;
-    var a = parseLen(form.elements.a.value, uOf('tape')), b = parseLen(form.elements.b.value, uOf('tape'));
-    var r = avg(a, b), el = $(sec + '-preview');
-    $(sec + '-err').hidden = true;
-    if (!ok(r)) { el.innerHTML = ''; return; }
-    var html = (ok(a) && ok(b) ? 'Average: ' : 'Reading: ') + '<strong>' + esc(fmtNum(r, uOf('tape')) + ' ' + uOf('tape')) + '</strong>';
-    if (bigGap(a, b)) html += '<br><span class="gap">' + GAP_TEXT + '</span>';
-    el.innerHTML = html;
-  }
-
-  function renderUnits() {
-    Array.prototype.forEach.call(document.querySelectorAll('[data-act="unit"]'), function (b) {
-      b.setAttribute('aria-pressed', String(b.dataset.unit === state.units));
-    });
-    Array.prototype.forEach.call(document.querySelectorAll('button.u'), function (el) {
-      var u = uOf(el.dataset.fu);
-      el.textContent = u;
-      el.setAttribute('aria-label', 'Units: ' + (u === 'in' ? 'inches' : 'millimetres') + '. Tap to switch.');
-    });
+    var end = form.dataset.end;
+    var a = parseLen(form.elements.a.value, tUnit()), b = parseLen(form.elements.b.value, tUnit());
+    var el = $(end + '-preview');
+    $(end + '-err').hidden = true;
+    if (!(ok(a) && ok(b))) { el.innerHTML = ''; return; }
+    el.innerHTML = 'Average <strong>' + esc(fmtLen(avg(a, b))) + '</strong>' +
+      (bigGap(a, b) ? '<br><span class="gap">' + GAP_TEXT + '</span>' : '');
   }
 
   function renderAll() {
     renderUnits();
-    renderBikeBar();
-    SECS.forEach(function (sec) {
-      fillInputs(sec);
-      var form = document.querySelector('form.add[data-sec="' + sec + '"]');
-      form.reset();
-      updatePreview(form);
-      update(sec);
-    });
-  }
-
-  // Change units without losing readings typed into the (unsaved) add-measurement boxes.
-  function switchUnits(change) {
-    var forms = Array.prototype.slice.call(document.querySelectorAll('form.add'));
-    var held = forms.map(function (f) {
-      return { a: parseLen(f.elements.a.value, uOf('tape')), b: parseLen(f.elements.b.value, uOf('tape')) };
-    });
-    change();
-    save();
-    renderUnits();
-    forms.forEach(function (f, i) {
-      f.elements.a.value = fmtNum(held[i].a, uOf('tape'));
-      f.elements.b.value = fmtNum(held[i].b, uOf('tape'));
-      updatePreview(f);
-    });
-    SECS.forEach(function (sc) { fillInputs(sc); update(sc); });
+    renderWhich();
+    renderPreset();
+    fillInputs();
+    ENDS.forEach(update);
   }
 
   function showStorageWarn() { if (!storageOk) $('storage-warn').hidden = false; }
 
+  // Change units without losing readings typed into the unsaved "add reading" boxes.
+  function switchUnits(change) {
+    var forms = Array.prototype.slice.call(document.querySelectorAll('form.add'));
+    var held = forms.map(function (f) {
+      return { a: parseLen(f.elements.a.value, tUnit()), b: parseLen(f.elements.b.value, tUnit()) };
+    });
+    change();
+    save();
+    renderUnits();
+    fillInputs();
+    forms.forEach(function (f, i) {
+      f.elements.a.value = fmtNum(held[i].a);
+      f.elements.b.value = fmtNum(held[i].b);
+      updatePreview(f);
+    });
+    ENDS.forEach(update);
+  }
+
   // ---------- events ----------
   document.addEventListener('input', function (e) {
     var el = e.target;
-    var form = el.closest && el.closest('form.add');
+    var form = el.closest('form.add');
     if (form) { if (el.name === 'a' || el.name === 'b') updatePreview(form); return; }
 
-    if (el.id === 'bike-name') {
-      bike().name = el.value;
-      var opt = $('bike-select').querySelector('option[value="' + CSS.escape(state.current) + '"]');
-      if (opt) opt.textContent = el.value || 'Unnamed bike';
+    if (el.id === 'tol') {
+      state.tol = parseLen(el.value, tUnit());
       save();
+      ENDS.forEach(update);
       return;
     }
-
-    var sec = el.dataset && el.dataset.sec, f = el.dataset && el.dataset.f, k = el.dataset && el.dataset.k;
-    if (!sec || !f || k === 'sel') return;
-    var s = bike()[sec];
-    if (k === 'len') s[f] = parseLen(el.value, uOf(el.dataset.fu));
-    else if (k === 'pct') s[f] = parseNum(el.value);
-    else s[f] = el.value;
+    if (el.dataset.custom) {
+      var parts = el.dataset.custom.split('.');
+      state.custom[parts[0]][parts[1]] = parseNum(el.value);
+      save();
+      update(parts[0]);
+      return;
+    }
+    var end = el.dataset.end, f = el.dataset.f, k = el.dataset.k;
+    if (!end || !f) return;
+    if (k === 'travel') state[end][f] = parseLen(el.value, trUnit());
+    else if (k === 'tape') state[end][f] = parseLen(el.value, tUnit());
+    else state[end][f] = el.value;
     save();
-    update(sec);
+    update(end);
   });
 
   document.addEventListener('change', function (e) {
     var el = e.target;
-    if (el.id === 'bike-select') {
-      state.current = el.value;
-      ui.confirmBikeDel = false;
-      ui.confirmClear = { rear: false, front: false };
-      save();
-      renderAll();
-      return;
+    if (el.name !== 'preset') return;
+    if (el.value === 'custom' && !state.custom) {
+      // start custom from whatever was selected
+      state.custom = {};
+      ENDS.forEach(function (end) { var p = pcts(end); state.custom[end] = { rider: p.rider, lo: p.lo, hi: p.hi }; });
     }
-    if (el.dataset && el.dataset.k === 'sel' && el.dataset.f === 'type') {
-      var sec = el.dataset.sec, s = bike()[sec], rg = RANGES[sec][el.value];
-      if (!rg) return;
-      s.type = el.value;
-      s.riderPct = (rg.r[0] + rg.r[1]) / 2;
-      s.freeLow = rg.f[0];
-      s.freeHigh = rg.f[1];
-      save();
-      fillInputs(sec);
-      update(sec);
-    }
+    state.preset = el.value;
+    save();
+    renderPreset();
+    fillInputs();
+    ENDS.forEach(update);
   });
 
   document.addEventListener('submit', function (e) {
     var form = e.target.closest('form.add');
     if (!form) return;
     e.preventDefault();
-    var sec = form.dataset.sec;
-    var a = parseLen(form.elements.a.value, uOf('tape')), b = parseLen(form.elements.b.value, uOf('tape'));
-    var err = $(sec + '-err');
+    var end = form.dataset.end;
+    var a = parseLen(form.elements.a.value, tUnit()), b = parseLen(form.elements.b.value, tUnit());
     if (!ok(a) && !ok(b)) {
-      err.textContent = 'Enter at least one reading.';
-      err.hidden = false;
+      $(end + '-err').textContent = 'Enter at least one reading.';
+      $(end + '-err').hidden = false;
       return;
     }
-    bike()[sec].log.push({ id: uid(), ts: Date.now(), a: a, b: b, note: form.elements.note.value.trim() });
-    ui.confirmClear[sec] = false;
+    state[end].log.push({ id: uid(), ts: Date.now(), a: a, b: b, note: form.elements.note.value.trim() });
+    confirmClear[end] = false;
     save();
     form.reset();
     updatePreview(form);
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    update(sec);
-    $(sec + '-latest').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    update(end);
+
+    var v = riderVerdict(avg(a, b), calc(end).target);
+    $('status').textContent = NAMES[end] + ' reading ' + fmtLen(avg(a, b)) + ': ' + (v ? v.head + '. ' + v.sub : 'added.');
+    $(end + '-verdict').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
 
   document.addEventListener('click', function (e) {
     var btn = e.target.closest('[data-act]');
     if (!btn) return;
-    var act = btn.dataset.act, sec = btn.dataset.sec;
+    var end = btn.dataset.end;
 
-    switch (act) {
+    switch (btn.dataset.act) {
       case 'unit':
         if (state.units === btn.dataset.unit) return;
         switchUnits(function () { state.units = btn.dataset.unit; });
         break;
-
-      case 'fu':
-        var key = btn.dataset.fu;
+      case 'travel-unit':
         switchUnits(function () {
-          var next = uOf(key) === 'mm' ? 'in' : 'mm';
-          if (key === 'tape') { state.units = next; return; }
-          if (next === state.units) delete state.fieldUnits[key];
-          else state.fieldUnits[key] = next;
+          var next = trUnit() === 'mm' ? 'in' : 'mm';
+          state.travelUnit = next === state.units ? null : next;
         });
         break;
-
-      case 'new-bike':
-        var nb = newBike('');
-        state.bikes.push(nb);
-        state.current = nb.id;
-        ui.confirmBikeDel = false;
-        ui.confirmClear = { rear: false, front: false };
+      case 'which':
+        state.which = btn.dataset.which;
         save();
-        renderAll();
-        $('bike-name').focus();
+        renderWhich();
         break;
-
-      case 'bike-del-ask': ui.confirmBikeDel = true; renderBikeDel(); break;
-      case 'bike-del-no': ui.confirmBikeDel = false; renderBikeDel(); break;
-      case 'bike-del-yes':
-        state.bikes = state.bikes.filter(function (b) { return b.id !== state.current; });
-        if (!state.bikes.length) state.bikes.push(newBike('My bike'));
-        state.current = state.bikes[0].id;
-        ui.confirmBikeDel = false;
-        ui.confirmClear = { rear: false, front: false };
+      case 'del':
+        state[end].log = state[end].log.filter(function (x) { return x.id !== btn.dataset.id; });
+        if (!state[end].log.length) confirmClear[end] = false;
         save();
-        renderAll();
+        update(end);
         break;
-
-      case 'row-del':
-        var s = bike()[sec];
-        s.log = s.log.filter(function (x) { return x.id !== btn.dataset.id; });
-        if (!s.log.length) ui.confirmClear[sec] = false;
-        save();
-        update(sec);
-        break;
-
-      case 'clear-ask': ui.confirmClear[sec] = true; update(sec); break;
-      case 'clear-no': ui.confirmClear[sec] = false; update(sec); break;
+      case 'clear-ask': confirmClear[end] = true; update(end); break;
+      case 'clear-no': confirmClear[end] = false; update(end); break;
       case 'clear-yes':
-        bike()[sec].log = [];
-        ui.confirmClear[sec] = false;
+        state[end].log = [];
+        confirmClear[end] = false;
         save();
-        update(sec);
+        update(end);
         break;
     }
   });
 
   // ---------- boot ----------
-  $('sections').innerHTML = SECS.map(sectionHTML).join('');
+  $('preset-rows').innerHTML = presetRowsHTML();
+  $('ends').innerHTML = ENDS.map(endHTML).join('');
   showStorageWarn();
   renderAll();
 })();

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Sag Calculator</title>
-  <meta name="description" content="Free motorcycle suspension sag calculator. Works out your rider sag and free sag targets and logs your readings as you adjust preload.">
+  <meta name="description" content="Free motorcycle suspension sag calculator. Works out your rider sag and free sag targets and tells you which way to adjust preload.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
@@ -14,11 +14,8 @@
 <body>
   <main class="wrap">
     <header class="top">
-      <div>
-        <h1>Sag Calculator</h1>
-        <p class="sub">Rear first, then front. Everything saves on this device.</p>
-      </div>
-      <div class="units" role="group" aria-label="Units for tape readings and results">
+      <h1>Sag Calculator</h1>
+      <div class="units" role="group" aria-label="Units for measurements and results">
         <button type="button" data-act="unit" data-unit="mm" aria-pressed="true">mm</button>
         <button type="button" data-act="unit" data-unit="in" aria-pressed="false">in</button>
       </div>
@@ -26,30 +23,57 @@
 
     <p id="storage-warn" class="banner" hidden>Your browser is blocking storage, so these numbers won't be kept after you close the page.</p>
 
-    <section class="card bike" aria-label="Bike">
-      <label class="field">
-        <span class="lbl">Bike name</span>
-        <input id="bike-name" class="text" type="text" placeholder="e.g. Ténéré 700" maxlength="60" autocomplete="off">
-      </label>
-      <div class="bike-row">
-        <label class="field grow">
-          <span class="lbl">Saved bikes</span>
-          <select id="bike-select"></select>
-        </label>
-        <button class="btn" type="button" data-act="new-bike">+ New bike</button>
+    <section class="card setup" aria-labelledby="setup-h">
+      <h2 id="setup-h" class="card-h">Setup</h2>
+
+      <div class="seg" role="group" aria-label="Which end to set">
+        <button type="button" data-act="which" data-which="both" aria-pressed="true">Both</button>
+        <button type="button" data-act="which" data-which="rear" aria-pressed="false">Rear only</button>
+        <button type="button" data-act="which" data-which="front" aria-pressed="false">Front only</button>
       </div>
-      <div id="bike-del" class="bike-del"></div>
+
+      <div class="pair">
+        <div class="field" data-show="rear">
+          <label class="lbl" for="travel-rear">Rear travel</label>
+          <div class="inp">
+            <input id="travel-rear" type="text" inputmode="decimal" autocomplete="off" data-end="rear" data-f="travel" data-k="travel" aria-describedby="travel-hint">
+            <button type="button" class="u" data-act="travel-unit">mm</button>
+          </div>
+        </div>
+        <div class="field" data-show="front">
+          <label class="lbl" for="travel-front">Front travel</label>
+          <div class="inp">
+            <input id="travel-front" type="text" inputmode="decimal" autocomplete="off" data-end="front" data-f="travel" data-k="travel" aria-describedby="travel-hint">
+            <button type="button" class="u" data-act="travel-unit">mm</button>
+          </div>
+        </div>
+      </div>
+      <p class="hint" id="travel-hint">Wheel travel, from your owner's manual.</p>
+
+      <fieldset class="presets">
+        <legend class="lbl">Riding style</legend>
+        <div class="phead" aria-hidden="true"><span></span><span>Rear</span><span>Front</span></div>
+        <div id="preset-rows"></div>
+      </fieldset>
+
+      <div id="custom" class="custom" hidden>
+        <div class="crow chead" aria-hidden="true"><span></span><span>Rear</span><span>Front</span></div>
+        <div class="crow"><span class="clbl">Rider sag</span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="rear.rider" aria-label="Rear rider sag %"><span class="suf">%</span></span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="front.rider" aria-label="Front rider sag %"><span class="suf">%</span></span></div>
+        <div class="crow"><span class="clbl">Free sag min</span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="rear.lo" aria-label="Rear free sag minimum %"><span class="suf">%</span></span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="front.lo" aria-label="Front free sag minimum %"><span class="suf">%</span></span></div>
+        <div class="crow"><span class="clbl">Free sag max</span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="rear.hi" aria-label="Rear free sag maximum %"><span class="suf">%</span></span><span class="inp pct"><input type="text" inputmode="decimal" autocomplete="off" data-custom="front.hi" aria-label="Front free sag maximum %"><span class="suf">%</span></span></div>
+      </div>
+
+      <div class="tol">
+        <label class="lbl" for="tol">Close enough ±</label>
+        <div class="inp"><input id="tol" type="text" inputmode="decimal" autocomplete="off"><span class="suf t-unit">mm</span></div>
+      </div>
     </section>
 
-    <nav class="jump" aria-label="Jump to section">
-      <a href="#sec-rear"><span class="step">1</span> Rear</a>
-      <a href="#sec-front"><span class="step">2</span> Front</a>
-    </nav>
-
-    <div id="sections"></div>
+    <div id="ends"></div>
+    <p id="status" class="sr-only" aria-live="polite"></p>
 
     <footer class="foot">
-      <p>Made by <a href="https://www.youtube.com/@BR-ADV" target="_blank" rel="noopener">BackroadADV</a> · <a href="https://www.youtube.com/@BR-ADV" target="_blank" rel="noopener">YouTube @BR-ADV</a></p>
+      <p>Made by <a href="https://www.youtube.com/@BR-ADV" target="_blank" rel="noopener">BackroadADV</a></p>
       <p>Starting ranges, not laws. Your owner's manual number wins.</p>
     </footer>
   </main>

@@ -1,6 +1,6 @@
 # Sag Calculator
 
-A free, phone-friendly motorcycle suspension sag calculator. It works out your rider sag and free sag targets and keeps a log of your readings as you adjust preload.
+A free, phone-friendly motorcycle suspension sag calculator. Enter travel, pick a riding style, and it tells you which way to adjust preload.
 
 **Live:** https://jpott09.github.io/sag-calculator/
 
