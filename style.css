@@ -392,3 +392,14 @@ input::placeholder { color: var(--placeholder); opacity: 1; font-weight: 400; }
 .verdict-slot:empty { display: none; }
 .verdict-slot .verdict { padding-right: 16px; }
 .v-how { font-size: 0.6em; font-weight: 600; }
+
+.n { white-space: nowrap; }
+.aim.free .aim-v { font-size: 1.5rem; }
+.aim-v small.pm { font-size: 0.6em; color: var(--text); font-weight: 700; }
+/* phones: target full width, reading box under it, so inch values stay on one line */
+.aim-row { grid-template-columns: minmax(0, 1fr); }
+.aim, .aim.free { min-height: 0; }
+.aim-v { white-space: nowrap; overflow-wrap: normal; }
+@media (min-width: 520px) {
+  .aim-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}

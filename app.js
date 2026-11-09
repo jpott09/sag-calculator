@@ -46,6 +46,9 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
+  // Keep a number like "21 1/8" on one line.
+  function num(str) { return '<span class="n">' + esc(str) + '</span>'; }
+  function numText(str) { return esc(str).replace(/(\d+ \d+\/\d+)/g, '<span class="n">$1</span>'); }
   var $ = function (id) { return document.getElementById(id); };
   function each(sel, fn) { Array.prototype.forEach.call(document.querySelectorAll(sel), fn); }
 
@@ -318,8 +321,8 @@
     var au = uOf('extended.' + end);
     aim.className = 'aim';
     aim.innerHTML = '<span class="aim-k">With you on it</span>' +
-      '<span class="aim-v">' + esc(fmtNum(c.target, au)) + ' <small>' + au + '</small></span>' +
-      '<span class="aim-s">' + esc(fmtNum(s.extended, au)) + ' − ' + esc(fmtNum(c.rs, au)) + ' sag (' + c.p.rider + '%)</span>';
+      '<span class="aim-v">' + num(fmtNum(c.target, au)) + ' <small>' + au + '</small></span>' +
+      '<span class="aim-s">' + num(fmtNum(s.extended, au)) + ' − ' + num(fmtNum(c.rs, au)) + ' sag (' + c.p.rider + '%)</span>';
 
     var el = $(end + '-reading');
     if (unreadable(el)) {
@@ -333,7 +336,7 @@
       v.innerHTML = '<div class="verdict v-' + rv.cls + '">' +
         '<p class="v-head"><span class="v-icon" aria-hidden="true">' + rv.icon + '</span>' + rv.head +
           (rv.how ? ' <span class="v-how">(' + rv.how + ')</span>' : '') + '</p>' +
-        '<p class="v-sub">' + esc(rv.sub) + '</p></div>' +
+        '<p class="v-sub">' + numText(rv.sub) + '</p></div>' +
         (s.reading > s.extended + 2 ? '<p class="gap">' + FIT_TEXT + '</p>' : '');
     }
 
@@ -347,7 +350,10 @@
     var fu = au;
     faim.className = 'aim free';
     faim.innerHTML = '<span class="aim-k">Bike alone</span>' +
-      '<span class="aim-v">' + esc(fmtNum(c.t2, fu)) + '–' + esc(fmtNum(c.t1, fu)) + ' <small>' + fu + '</small></span>' +
+      // window shown as centre ± half-width, the way you'd mark it on a tape (570–580 -> 575 ± 5)
+      '<span class="aim-v">' + num(fmtNum((c.t1 + c.t2) / 2, fu)) +
+        (fmtNum((c.t1 - c.t2) / 2, fu) !== '0' ? ' <small class="pm">± ' + num(fmtNum((c.t1 - c.t2) / 2, fu)) + '</small>' : '') +
+        ' <small>' + fu + '</small></span>' +
       '<span class="aim-s">' + c.lo + '–' + c.hi + '% free sag</span>';
 
     var fel = $(end + '-free');
