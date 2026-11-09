@@ -313,7 +313,7 @@
     aim.className = 'aim';
     aim.innerHTML = '<span class="aim-k">With you on it</span>' +
       '<span class="aim-v">' + esc(fmtNum(c.target)) + ' <small>' + tUnit() + '</small></span>' +
-      '<span class="aim-s">' + esc(fmtLen(c.rs)) + ' sag (' + c.p.rider + '%)</span>';
+      '<span class="aim-s">' + esc(fmtNum(s.extended)) + ' − ' + esc(fmtNum(c.rs)) + ' sag (' + c.p.rider + '%)</span>';
 
     var el = $(end + '-reading');
     if (unreadable(el)) {
