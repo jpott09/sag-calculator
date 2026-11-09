@@ -15,7 +15,7 @@
   <main class="wrap">
     <header class="top">
       <h1>Sag Calculator</h1>
-      <div class="units" role="group" aria-label="Units for measurements and results">
+      <div class="units" role="group" aria-label="Units for results">
         <button type="button" data-act="unit" data-unit="mm" aria-pressed="true">mm</button>
         <button type="button" data-act="unit" data-unit="in" aria-pressed="false">in</button>
       </div>
@@ -36,15 +36,15 @@
         <div class="field" data-show="rear">
           <label class="lbl" for="travel-rear">Rear travel</label>
           <div class="inp">
-            <input id="travel-rear" type="text" inputmode="decimal" autocomplete="off" data-end="rear" data-f="travel" data-k="travel" aria-describedby="travel-hint">
-            <button type="button" class="u" data-act="travel-unit"></button>
+            <input id="travel-rear" type="text" inputmode="decimal" autocomplete="off" data-end="rear" data-f="travel" data-u="travel.rear" aria-describedby="travel-hint">
+            <button type="button" class="u" data-act="box-unit" data-u="travel.rear"></button>
           </div>
         </div>
         <div class="field" data-show="front">
           <label class="lbl" for="travel-front">Front travel</label>
           <div class="inp">
-            <input id="travel-front" type="text" inputmode="decimal" autocomplete="off" data-end="front" data-f="travel" data-k="travel" aria-describedby="travel-hint">
-            <button type="button" class="u" data-act="travel-unit"></button>
+            <input id="travel-front" type="text" inputmode="decimal" autocomplete="off" data-end="front" data-f="travel" data-u="travel.front" aria-describedby="travel-hint">
+            <button type="button" class="u" data-act="box-unit" data-u="travel.front"></button>
           </div>
         </div>
       </div>
@@ -65,7 +65,7 @@
 
       <div class="tol">
         <label class="lbl" for="tol">Close enough ±</label>
-        <div class="inp"><input id="tol" type="text" inputmode="decimal" autocomplete="off"><button type="button" class="u" data-act="tape-unit"></button></div>
+        <div class="inp"><input id="tol" type="text" inputmode="decimal" autocomplete="off" data-u="tol"><button type="button" class="u" data-act="box-unit" data-u="tol"></button></div>
       </div>
     </section>
 

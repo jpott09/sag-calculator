@@ -36,7 +36,7 @@
     }
   };
 
-  var TAPE_BTN = '<button type="button" class="u" data-act="tape-unit"></button>';
+  function unitBtn(key) { return '<button type="button" class="u" data-act="box-unit" data-u="' + key + '"></button>'; }
   var GAP_TEXT = 'Big gap between readings: something may be binding (linkage, fork seals).';
 
   // ---------- helpers ----------
@@ -56,13 +56,21 @@
     return { travel: null, extended: null, log: [], freeA: null, freeB: null, normal: '', loaded: '' };
   }
   function freshState() {
-    return { units: 'mm', travelUnit: null, which: 'both', preset: 'dualsport', custom: null, tol: 3, rear: newEnd(), front: newEnd() };
+    return { units: 'mm', fieldUnits: {}, which: 'both', preset: 'dualsport', custom: null, tol: 3, rear: newEnd(), front: newEnd() };
   }
 
   function normalize(s) {
     var o = freshState();
     if (s.units === 'in') o.units = 'in';
-    if (s.travelUnit === 'mm' || s.travelUnit === 'in') o.travelUnit = s.travelUnit;
+    if (s.fieldUnits && typeof s.fieldUnits === 'object') {
+      Object.keys(s.fieldUnits).forEach(function (k) {
+        if (s.fieldUnits[k] === 'mm' || s.fieldUnits[k] === 'in') o.fieldUnits[k] = s.fieldUnits[k];
+      });
+    }
+    if (s.travelUnit === 'mm' || s.travelUnit === 'in') { // earlier version: one travel unit
+      o.fieldUnits['travel.rear'] = o.fieldUnits['travel.rear'] || s.travelUnit;
+      o.fieldUnits['travel.front'] = o.fieldUnits['travel.front'] || s.travelUnit;
+    }
     if (['both', 'rear', 'front'].indexOf(s.which) >= 0) o.which = s.which;
     if (s.preset === 'custom' || RANGES.rear[s.preset]) o.preset = s.preset;
     if (ok(s.tol)) o.tol = s.tol;
@@ -120,9 +128,10 @@
   var confirmClear = { rear: false, front: false };
 
   // ---------- units ----------
-  // state.units: tape readings + results. state.travelUnit: optional override for travel only.
+  // state.units: results, and the default for any box the user hasn't switched.
+  // state.fieldUnits['extended.rear'] etc: that one box's own unit.
   function tUnit() { return state.units; }
-  function trUnit() { return state.travelUnit || state.units; }
+  function uOf(key) { return state.fieldUnits[key] || state.units; }
 
   function fmtNum(mm, u) {
     if (!ok(mm)) return '';
@@ -218,7 +227,7 @@
     var p = end + '-', front = end === 'front';
     function tapeInput(id, f, label) {
       return '<div class="field"><label class="lbl sm" for="' + id + '">' + label + '</label>' +
-        '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-k="tape">' + TAPE_BTN + '</div></div>';
+        '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-u="' + f + '.' + end + '">' + unitBtn(f + '.' + end) + '</div></div>';
     }
     function textInput(f, label, ph) {
       return '<div class="field"><label class="lbl sm" for="' + p + f + '">' + label + '</label>' +
@@ -231,7 +240,7 @@
 
         '<div class="field">' +
           '<label class="lbl" for="' + p + 'ext">Fully extended</label>' +
-          '<div class="inp"><input id="' + p + 'ext" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="extended" data-k="tape" aria-describedby="' + p + 'ext-h">' + TAPE_BTN + '</div>' +
+          '<div class="inp"><input id="' + p + 'ext" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="extended" data-u="extended.' + end + '" aria-describedby="' + p + 'ext-h">' + unitBtn('extended.' + end) + '</div>' +
           '<p class="hint" id="' + p + 'ext-h">' + (front ? 'Front wheel off the ground. ' : 'Bike lifted, wheel off the ground. ') + 'Same two points every time.</p>' +
         '</div>' +
 
@@ -240,8 +249,8 @@
         '<form class="add" data-end="' + end + '" novalidate>' +
           '<fieldset><legend class="lbl">Reading with you on it</legend>' +
             '<div class="pair">' +
-              '<div class="field"><label class="lbl sm" for="' + p + 'a">Lifted &amp; settled</label><div class="inp"><input id="' + p + 'a" name="a" type="text" inputmode="decimal" autocomplete="off">' + TAPE_BTN + '</div></div>' +
-              '<div class="field"><label class="lbl sm" for="' + p + 'b">Pushed &amp; returned</label><div class="inp"><input id="' + p + 'b" name="b" type="text" inputmode="decimal" autocomplete="off">' + TAPE_BTN + '</div></div>' +
+              '<div class="field"><label class="lbl sm" for="' + p + 'a">Lifted &amp; settled</label><div class="inp"><input id="' + p + 'a" name="a" type="text" inputmode="decimal" autocomplete="off" data-u="a.' + end + '">' + unitBtn('a.' + end) + '</div></div>' +
+              '<div class="field"><label class="lbl sm" for="' + p + 'b">Pushed &amp; returned</label><div class="inp"><input id="' + p + 'b" name="b" type="text" inputmode="decimal" autocomplete="off" data-u="b.' + end + '">' + unitBtn('b.' + end) + '</div></div>' +
             '</div>' +
             '<div class="note-row">' +
               '<input class="text" name="note" type="text" autocomplete="off" maxlength="80" placeholder="Note, e.g. +1 turn" aria-label="Note (optional)">' +
@@ -278,9 +287,8 @@
   // ---------- rendering ----------
   function fillInputs() {
     each('[data-f]', function (el) {
-      var v = state[el.dataset.end][el.dataset.f], k = el.dataset.k;
-      if (k === 'travel') el.value = fmtNum(v, trUnit());
-      else if (k === 'tape') el.value = fmtNum(v, tUnit());
+      var v = state[el.dataset.end][el.dataset.f];
+      if (el.dataset.u) el.value = fmtNum(v, uOf(el.dataset.u));
       else el.value = v == null ? '' : v;
     });
     each('[data-custom]', function (el) {
@@ -288,15 +296,15 @@
       var v = state.custom && state.custom[parts[0]][parts[1]];
       el.value = ok(v) ? String(v) : '';
     });
-    $('tol').value = fmtNum(state.tol, tUnit());
+    $('tol').value = fmtNum(state.tol, uOf('tol'));
   }
 
   function renderUnits() {
     each('[data-act="unit"]', function (b) { b.setAttribute('aria-pressed', String(b.dataset.unit === state.units)); });
     each('button.u', function (b) {
-      var travel = b.dataset.act === 'travel-unit', u = travel ? trUnit() : tUnit();
+      var u = uOf(b.dataset.u);
       b.innerHTML = '<span' + (u === 'mm' ? ' class="on"' : '') + '>mm</span><span' + (u === 'in' ? ' class="on"' : '') + '>in</span>';
-      b.setAttribute('aria-label', (travel ? 'Travel units: ' : 'Units: ') + (u === 'in' ? 'inches' : 'millimetres') + '. Switch to ' + (u === 'in' ? 'millimetres' : 'inches'));
+      b.setAttribute('aria-label', 'Units for this box: ' + (u === 'in' ? 'inches' : 'millimetres') + '. Switch to ' + (u === 'in' ? 'millimetres' : 'inches'));
     });
   }
 
@@ -328,7 +336,7 @@
       t.className = 'target';
       t.innerHTML = '<span class="t-k">Target with you on it</span>' +
         '<span class="t-v">' + esc(fmtNum(c.target)) + ' <small>' + tUnit() + '</small></span>' +
-        '<span class="t-s">' + esc(fmtLen(c.rs)) + ' of sag (' + c.p.rider + '% of ' + esc(fmtLen(s.travel, trUnit())) + ')</span>';
+        '<span class="t-s">' + esc(fmtLen(c.rs)) + ' of sag (' + c.p.rider + '% of ' + esc(fmtLen(s.travel, uOf('travel.' + end))) + ')</span>';
     }
 
     renderVerdict(end, s, c);
@@ -408,7 +416,7 @@
 
   function updatePreview(form) {
     var end = form.dataset.end;
-    var a = parseLen(form.elements.a.value, tUnit()), b = parseLen(form.elements.b.value, tUnit());
+    var a = boxVal(form.elements.a), b = boxVal(form.elements.b);
     var el = $(end + '-preview');
     $(end + '-err').hidden = true;
     if (!(ok(a) && ok(b))) { el.innerHTML = ''; return; }
@@ -424,21 +432,23 @@
     ENDS.forEach(update);
   }
 
+  function boxVal(el) { return parseLen(el.value, uOf(el.dataset.u)); }
+
   function showStorageWarn() { if (!storageOk) $('storage-warn').hidden = false; }
 
   // Change units without losing readings typed into the unsaved "add reading" boxes.
   function switchUnits(change) {
     var forms = Array.prototype.slice.call(document.querySelectorAll('form.add'));
     var held = forms.map(function (f) {
-      return { a: parseLen(f.elements.a.value, tUnit()), b: parseLen(f.elements.b.value, tUnit()) };
+      return { a: boxVal(f.elements.a), b: boxVal(f.elements.b) };
     });
     change();
     save();
     renderUnits();
     fillInputs();
     forms.forEach(function (f, i) {
-      f.elements.a.value = fmtNum(held[i].a);
-      f.elements.b.value = fmtNum(held[i].b);
+      f.elements.a.value = fmtNum(held[i].a, uOf(f.elements.a.dataset.u));
+      f.elements.b.value = fmtNum(held[i].b, uOf(f.elements.b.dataset.u));
       updatePreview(f);
     });
     ENDS.forEach(update);
@@ -451,7 +461,7 @@
     if (form) { if (el.name === 'a' || el.name === 'b') updatePreview(form); return; }
 
     if (el.id === 'tol') {
-      state.tol = parseLen(el.value, tUnit());
+      state.tol = boxVal(el);
       save();
       ENDS.forEach(update);
       return;
@@ -463,11 +473,9 @@
       update(parts[0]);
       return;
     }
-    var end = el.dataset.end, f = el.dataset.f, k = el.dataset.k;
+    var end = el.dataset.end, f = el.dataset.f;
     if (!end || !f) return;
-    if (k === 'travel') state[end][f] = parseLen(el.value, trUnit());
-    else if (k === 'tape') state[end][f] = parseLen(el.value, tUnit());
-    else state[end][f] = el.value;
+    state[end][f] = el.dataset.u ? boxVal(el) : el.value;
     save();
     update(end);
   });
@@ -492,7 +500,7 @@
     if (!form) return;
     e.preventDefault();
     var end = form.dataset.end;
-    var a = parseLen(form.elements.a.value, tUnit()), b = parseLen(form.elements.b.value, tUnit());
+    var a = boxVal(form.elements.a), b = boxVal(form.elements.b);
     if (!ok(a) && !ok(b)) {
       $(end + '-err').textContent = 'Enter at least one reading.';
       $(end + '-err').hidden = false;
@@ -521,14 +529,13 @@
         if (state.units === btn.dataset.unit) return;
         switchUnits(function () { state.units = btn.dataset.unit; });
         break;
-      case 'tape-unit':
-        switchUnits(function () { state.units = state.units === 'mm' ? 'in' : 'mm'; });
-        break;
-      case 'travel-unit':
-        switchUnits(function () {
-          var next = trUnit() === 'mm' ? 'in' : 'mm';
-          state.travelUnit = next === state.units ? null : next;
-        });
+      case 'box-unit':
+        // Keep what's typed and read it in the new unit (24 mm -> 24 in, not 0.94 in).
+        var key = btn.dataset.u;
+        state.fieldUnits[key] = uOf(key) === 'mm' ? 'in' : 'mm';
+        save();
+        renderUnits();
+        btn.parentNode.querySelector('input').dispatchEvent(new Event('input', { bubbles: true }));
         break;
       case 'which':
         state.which = btn.dataset.which;
