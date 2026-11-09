@@ -143,15 +143,19 @@ fieldset > .pair { margin-top: 8px; }
   position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
   color: var(--muted); font-size: 0.95rem; pointer-events: none;
 }
-.inp:has(button.u) input { padding-right: 64px; }
+.inp:has(button.u) input { padding-right: 70px; }
+/* compact mm | in switch inside a box; active unit filled */
 .inp button.u {
-  position: absolute; right: 5px; top: 5px; bottom: 5px;
-  min-width: 50px; padding: 0 8px;
-  border: 1px solid var(--field-line); border-radius: 7px;
-  background: var(--surface-2); color: var(--accent);
-  font: 700 0.95rem var(--font);
+  position: absolute; right: 5px; top: 6px; bottom: 6px;
+  display: flex; align-items: stretch; gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--field-line); border-radius: 8px;
+  background: var(--surface-2);
+  font: 600 0.8rem var(--font);
   cursor: pointer;
 }
+.inp button.u span { display: grid; place-items: center; min-width: 27px; border-radius: 5px; color: var(--muted); }
+.inp button.u span.on { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 
 input:not([type="radio"]) {
   width: 100%;

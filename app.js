@@ -36,6 +36,7 @@
     }
   };
 
+  var TAPE_BTN = '<button type="button" class="u" data-act="tape-unit"></button>';
   var GAP_TEXT = 'Big gap between readings: something may be binding (linkage, fork seals).';
 
   // ---------- helpers ----------
@@ -217,7 +218,7 @@
     var p = end + '-', front = end === 'front';
     function tapeInput(id, f, label) {
       return '<div class="field"><label class="lbl sm" for="' + id + '">' + label + '</label>' +
-        '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-k="tape"><span class="suf t-unit">mm</span></div></div>';
+        '<div class="inp"><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="' + f + '" data-k="tape">' + TAPE_BTN + '</div></div>';
     }
     function textInput(f, label, ph) {
       return '<div class="field"><label class="lbl sm" for="' + p + f + '">' + label + '</label>' +
@@ -230,7 +231,7 @@
 
         '<div class="field">' +
           '<label class="lbl" for="' + p + 'ext">Fully extended</label>' +
-          '<div class="inp"><input id="' + p + 'ext" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="extended" data-k="tape" aria-describedby="' + p + 'ext-h"><span class="suf t-unit">mm</span></div>' +
+          '<div class="inp"><input id="' + p + 'ext" type="text" inputmode="decimal" autocomplete="off" data-end="' + end + '" data-f="extended" data-k="tape" aria-describedby="' + p + 'ext-h">' + TAPE_BTN + '</div>' +
           '<p class="hint" id="' + p + 'ext-h">' + (front ? 'Front wheel off the ground. ' : 'Bike lifted, wheel off the ground. ') + 'Same two points every time.</p>' +
         '</div>' +
 
@@ -239,8 +240,8 @@
         '<form class="add" data-end="' + end + '" novalidate>' +
           '<fieldset><legend class="lbl">Reading with you on it</legend>' +
             '<div class="pair">' +
-              '<div class="field"><label class="lbl sm" for="' + p + 'a">Lifted &amp; settled</label><div class="inp"><input id="' + p + 'a" name="a" type="text" inputmode="decimal" autocomplete="off"><span class="suf t-unit">mm</span></div></div>' +
-              '<div class="field"><label class="lbl sm" for="' + p + 'b">Pushed &amp; returned</label><div class="inp"><input id="' + p + 'b" name="b" type="text" inputmode="decimal" autocomplete="off"><span class="suf t-unit">mm</span></div></div>' +
+              '<div class="field"><label class="lbl sm" for="' + p + 'a">Lifted &amp; settled</label><div class="inp"><input id="' + p + 'a" name="a" type="text" inputmode="decimal" autocomplete="off">' + TAPE_BTN + '</div></div>' +
+              '<div class="field"><label class="lbl sm" for="' + p + 'b">Pushed &amp; returned</label><div class="inp"><input id="' + p + 'b" name="b" type="text" inputmode="decimal" autocomplete="off">' + TAPE_BTN + '</div></div>' +
             '</div>' +
             '<div class="note-row">' +
               '<input class="text" name="note" type="text" autocomplete="off" maxlength="80" placeholder="Note, e.g. +1 turn" aria-label="Note (optional)">' +
@@ -292,10 +293,10 @@
 
   function renderUnits() {
     each('[data-act="unit"]', function (b) { b.setAttribute('aria-pressed', String(b.dataset.unit === state.units)); });
-    each('.t-unit', function (el) { el.textContent = tUnit(); });
-    each('[data-act="travel-unit"]', function (b) {
-      b.textContent = trUnit();
-      b.setAttribute('aria-label', 'Travel in ' + (trUnit() === 'in' ? 'inches' : 'millimetres') + '. Tap to switch.');
+    each('button.u', function (b) {
+      var travel = b.dataset.act === 'travel-unit', u = travel ? trUnit() : tUnit();
+      b.innerHTML = '<span' + (u === 'mm' ? ' class="on"' : '') + '>mm</span><span' + (u === 'in' ? ' class="on"' : '') + '>in</span>';
+      b.setAttribute('aria-label', (travel ? 'Travel units: ' : 'Units: ') + (u === 'in' ? 'inches' : 'millimetres') + '. Switch to ' + (u === 'in' ? 'millimetres' : 'inches'));
     });
   }
 
@@ -519,6 +520,9 @@
       case 'unit':
         if (state.units === btn.dataset.unit) return;
         switchUnits(function () { state.units = btn.dataset.unit; });
+        break;
+      case 'tape-unit':
+        switchUnits(function () { state.units = state.units === 'mm' ? 'in' : 'mm'; });
         break;
       case 'travel-unit':
         switchUnits(function () {
