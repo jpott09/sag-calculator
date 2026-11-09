@@ -252,10 +252,7 @@
               '<div class="field"><label class="lbl sm" for="' + p + 'a">Lifted &amp; settled</label><div class="inp"><input id="' + p + 'a" name="a" type="text" inputmode="decimal" autocomplete="off" data-u="a.' + end + '">' + unitBtn('a.' + end) + '</div></div>' +
               '<div class="field"><label class="lbl sm" for="' + p + 'b">Pushed &amp; returned</label><div class="inp"><input id="' + p + 'b" name="b" type="text" inputmode="decimal" autocomplete="off" data-u="b.' + end + '">' + unitBtn('b.' + end) + '</div></div>' +
             '</div>' +
-            '<div class="note-row">' +
-              '<input class="text" name="note" type="text" autocomplete="off" maxlength="80" placeholder="Note, e.g. +1 turn" aria-label="Note (optional)">' +
-              '<button class="btn primary" type="submit">Add</button>' +
-            '</div>' +
+            '<button class="btn primary add-btn" type="submit">Add reading</button>' +
             '<p class="preview" id="' + p + 'preview"></p>' +
             '<p class="form-err" id="' + p + 'err" hidden></p>' +
           '</fieldset>' +
@@ -353,13 +350,12 @@
     if (!e) { box.innerHTML = ''; return; }
     var r = readingOf(e), v = riderVerdict(r, c.target);
     var del = '<button class="x" type="button" data-act="del" data-end="' + end + '" data-id="' + esc(e.id) + '" aria-label="Delete reading ' + esc(fmtLen(r)) + '">×</button>';
-    var note = e.note ? '<p class="v-note">' + esc(e.note) + '</p>' : '';
     var html = v
       ? '<div class="verdict v-' + v.cls + '">' + del +
           '<p class="v-head"><span class="v-icon" aria-hidden="true">' + v.icon + '</span>' + v.head + '</p>' +
           '<p class="v-sub">' + esc(v.sub) + ' <span class="v-nums">' + esc(fmtLen(r)) + ' vs ' + esc(fmtLen(c.target)) + '</span></p>' +
-          note + '</div>'
-      : '<div class="verdict">' + del + '<p class="v-head">' + esc(fmtLen(r)) + '</p><p class="v-sub">Finish setup to get a verdict.</p>' + note + '</div>';
+          '</div>'
+      : '<div class="verdict">' + del + '<p class="v-head">' + esc(fmtLen(r)) + '</p><p class="v-sub">Finish setup to get a verdict.</p></div>';
     if (bigGap(e.a, e.b)) html += '<p class="gap">' + GAP_TEXT + '</p>';
     box.innerHTML = html;
   }
@@ -379,7 +375,7 @@
         html += '<li class="row' + (v ? ' v-' + v.cls : '') + '">' +
           '<span class="row-read">' + esc(fmtLen(r)) + '</span>' +
           '<span class="row-v">' + (v ? '<span aria-hidden="true">' + v.icon + '</span> ' + esc(fmtOff(r - c.target)) : '') + '</span>' +
-          '<span class="row-meta">' + esc([e.note, fmtTime(e.ts)].filter(Boolean).join(' · ')) +
+          '<span class="row-meta">' + esc(fmtTime(e.ts)) +
             (bigGap(e.a, e.b) ? ' <span class="gap-tag">⚠ gap</span>' : '') + '</span>' +
           '<button class="x" type="button" data-act="del" data-end="' + end + '" data-id="' + esc(e.id) + '" aria-label="Delete reading ' + esc(fmtLen(r)) + ' from ' + esc(fmtTime(e.ts)) + '">×</button>' +
           '</li>';
@@ -506,7 +502,7 @@
       $(end + '-err').hidden = false;
       return;
     }
-    state[end].log.push({ id: uid(), ts: Date.now(), a: a, b: b, note: form.elements.note.value.trim() });
+    state[end].log.push({ id: uid(), ts: Date.now(), a: a, b: b });
     confirmClear[end] = false;
     save();
     form.reset();

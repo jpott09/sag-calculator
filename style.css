@@ -227,9 +227,7 @@ input::placeholder { color: var(--placeholder); opacity: 1; font-weight: 400; }
 .btn.link { justify-self: start; min-height: 44px; padding: 0 2px; border: 0; background: none; color: var(--muted); text-decoration: underline; font-weight: 500; }
 .btn:active { transform: translateY(1px); }
 
-.note-row { display: flex; gap: 10px; margin-top: 10px; }
-.note-row input { flex: 1; min-width: 0; }
-.note-row .btn { flex: none; }
+.add-btn { width: 100%; margin-top: 10px; }
 
 .preview { color: var(--muted); font-size: 0.95rem; margin-top: 8px; }
 .preview:empty { display: none; }
@@ -265,7 +263,6 @@ input::placeholder { color: var(--placeholder); opacity: 1; font-weight: 400; }
 .v-icon { font-size: 0.8em; }
 .v-sub { font-size: 1rem; }
 .v-nums { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.v-note { color: var(--muted); font-style: italic; font-size: 0.95rem; }
 .verdict.small { padding-right: 16px; }
 .verdict.small .v-head { font-size: 1.2rem; }
 
